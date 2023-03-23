@@ -1,0 +1,1 @@
+--data_root="/home/reza/Documents/GLAS" --encoder_name="resnet50" --proj_dim=128 --pretrained="/home/reza/Documents/ContrastiveSeg/weights" --loss_weight=0.1 --batch_size=32 --metadata_root="/home/reza/Documents/ContrastiveSeg/datasets/folds/GLAS/fold-0" --use_pseudo_mask --num_samples=5 --fore_threshold=0.5 --back_threshold=0.5 --trial 0010
