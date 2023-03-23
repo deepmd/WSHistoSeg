@@ -1,1 +1,1 @@
-# ContrastiveSeg
+# Weakly Supervised Histology Segmentation
