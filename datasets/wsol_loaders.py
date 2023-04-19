@@ -5,12 +5,14 @@ import cv2
 from easydict import EasyDict
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
 class WsolDataset(Dataset):
     def __init__(self, data_root, metadata_root, transforms=None,
-                 use_pseudo_masks=False, fore_threshold=-1, back_threshold=-1, ignore_index=-1):
+                 use_pseudo_masks=False, output_layer_numbers="34",
+                 fore_threshold=-1, back_threshold=-1, ignore_index=-1):
         super(WsolDataset, self).__init__()
         self.data_root = data_root
         self.use_pseudo_masks = use_pseudo_masks
@@ -19,8 +21,10 @@ class WsolDataset(Dataset):
         self.image_labels = WsolDataset.get_class_labels(self.metadata)
         # self.num_sample_per_class = num_sample_per_class
         self.index_id = {image_id: idx for idx, image_id in enumerate(self.image_ids)}
-        self.mask_paths = WsolDataset.get_mask_paths(self.metadata, self.use_pseudo_masks)[0]
+        self.mask_paths = WsolDataset.get_mask_paths(self.metadata)[0] if not self.use_pseudo_masks else None
+        self.cam_paths = WsolDataset.get_cam_paths(self.metadata)
         self.transforms = transforms
+        self.output_layer_numbers = output_layer_numbers
         self.fore_threshold = fore_threshold
         self.back_threshold = back_threshold
         self.ignore_index = ignore_index
@@ -33,6 +37,7 @@ class WsolDataset(Dataset):
         metadata.class_labels = os.path.join(metadata_root, 'class_labels.txt')
         metadata.image_sizes = os.path.join(metadata_root, 'image_sizes.txt')
         metadata.localization = os.path.join(metadata_root, 'localization.txt')
+        metadata.image_cams = os.path.join(metadata_root, 'image_cams.txt')
         return metadata
 
     @staticmethod
@@ -92,12 +97,7 @@ class WsolDataset(Dataset):
 
             for line in f.readlines():
                 image_id, mask_path, ignore_path = line.strip('\n').split(',')
-                if use_pseudo_masks:
-                    new_mask_path = os.path.dirname(mask_path)
-                    new_mask_path = os.path.join(new_mask_path, 'train_gradcam_masks')
-                    mask_path = os.path.join(new_mask_path, os.path.basename(mask_path).replace('bmp', 'npy'))
                 if image_id in mask_paths:
-                    # mask_path = mask_path  # if not use_pseudo_masks else os.path.dirname(mask_path)
                     mask_paths[image_id].append(mask_path)
                     assert (len(ignore_path) == 0)
                 else:
@@ -105,8 +105,39 @@ class WsolDataset(Dataset):
                     ignore_paths[image_id] = ignore_path
         return mask_paths, ignore_paths
 
+    @staticmethod
+    def get_cam_paths(metadata):
+        cam_paths = {}
+        with open(metadata.image_cams) as f:
+            for line in f.readlines():
+                line_parts = line.strip('\n').split(',')
+                image_id, cam_file_paths = line_parts[0], line_parts[1:]
+                cam_paths[image_id] = cam_file_paths
+        return cam_paths
+
     def __len__(self):
         return len(self.image_ids)
+
+    def get_cam(self, image_id, image_size, layer_numbers):
+        cams = {'layer1': None, 'layer2': None, 'layer3': None, 'layer4': None}
+        layer_numbers = map(int, list(layer_numbers))
+        for layer_number in layer_numbers:
+            cam_file = os.path.join(self.data_root, self.cam_paths[image_id][layer_number-1])
+            cam = np.load(cam_file)
+            # mask = (cam > 0.5).astype(np.uint8)
+            cam = torch.from_numpy(cam).float()
+            # mask = mask.unsqueeze(0).unsqueeze(0)
+            cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0), image_size, mode='bicubic', align_corners=True)
+            cams[f'layer{layer_number}'] = cam.squeeze(0)  # 1, H, W
+        return cams
+
+    def get_mask(self, image_id):
+        mask_file = os.path.join(self.data_root, self.mask_paths[image_id][0])
+        mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE).astype(np.float)
+        mask = (mask > 0.5).astype(np.uint8)
+        mask = torch.from_numpy(mask).long()
+        mask = mask.unsqueeze(0)  # 1, H, W
+        return mask
 
     def __getitem__(self, idx):
         image_id = self.image_ids[idx]
@@ -115,44 +146,55 @@ class WsolDataset(Dataset):
         image = image.convert('RGB')  # H, W, 3
         raw_image = image.copy()
 
-        mask_file = os.path.join(self.data_root, self.mask_paths[image_id][0])
-        if not self.use_pseudo_masks:
-            mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE).astype(np.float)
-            mask = (mask > 0.5).astype(np.uint8)
-            mask = torch.from_numpy(mask).long()
-            mask = mask.unsqueeze(0)  # 1, H, W
-        else:
-            mask = np.load(mask_file)
-            # mask = (pseudo_mask > 0.5).astype(np.uint8)
-            # mask = np.expand_dims(mask, axis=0)  # 1, H, W
-            mask = Image.fromarray(mask)
-            mask = mask.resize(image.size, resample=Image.NEAREST)
+        cams = self.get_cam(image_id, image.size, layer_numbers=self.output_layer_numbers)
+        masks = {'layer1': None, 'layer2': None, 'layer3': None, 'layer4': None}
+        masks['layer4'] = self.get_mask(image_id) if not self.use_pseudo_masks else None
+        # mask = (pseudo_mask > 0.5).astype(np.uint8)
+        # mask = np.expand_dims(mask, axis=0)  # 1, H, W
+        # mask = Image.fromarray(mask)
+        # mask = mask.resize(image.size, resample=Image.NEAREST)
 
         if self.transforms:
-            image, raw_image, _, mask = self.transforms(image, raw_image, None, mask)
+            image, raw_image, \
+            cams['layer4'], cams['layer3'], cams['layer2'], cams['layer1'], \
+            masks['layer4'], masks['layer3'], masks['layer2'], masks['layer1'] = \
+                self.transforms(image, raw_image, cams['layer4'], cams['layer3'], cams['layer2'], cams['layer1'],
+                                masks['layer4'], masks['layer3'], masks['layer2'], masks['layer1'])
 
-        cam = mask
         if self.use_pseudo_masks:
-            mask = np.array(mask)
-            cam = mask
-            final_mask = np.ones_like(mask) * self.ignore_index
-            if self.fore_threshold != -1:
-                final_mask[mask > self.fore_threshold] = 1
-            if self.back_threshold != -1:
-                final_mask[mask <= self.back_threshold] = 0
-            mask = torch.from_numpy(final_mask).long()
-            mask = mask.unsqueeze(0)  # 1, H, W
+            for layer_name, cam in cams.items():
+                if cam is not None:
+                    mask = torch.ones_like(cam) * self.ignore_index
+                    if self.fore_threshold != -1:
+                        mask[cam > self.fore_threshold] = 1
+                    if self.back_threshold != -1:
+                        mask[cam <= self.back_threshold] = 0
+                    # mask = F.interpolate(mask.unsqueeze(0), image.size()[1:], mode='nearest')
+                    masks[layer_name] = mask.long()
+
+            # mask = np.array(mask)
+            # cam = mask
+            # final_mask = np.ones_like(mask) * self.ignore_index
+            # if self.fore_threshold != -1:
+            #     final_mask[mask > self.fore_threshold] = 1
+            # if self.back_threshold != -1:
+            #     final_mask[mask <= self.back_threshold] = 0
+            # mask = torch.from_numpy(final_mask).long()
+            # mask = mask.unsqueeze(0)  # 1, H, W
 
         raw_image = np.array(raw_image, dtype=np.float32)  # h, w, 3
         raw_image = torch.from_numpy(raw_image).permute(2, 0, 1)  # 3, h, w
+
+        masks = {key: value for key, value in masks.items() if value is not None}
+        cams = {key: value for key, value in cams.items() if value is not None}
 
         return {
             'image': image,
             'label': image_label,
             'image_id': image_id,
             'raw_image': raw_image,
-            'mask': mask,
-            'cam': cam
+            'mask': masks,
+            'cam': cams,
         }
 
 

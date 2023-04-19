@@ -194,29 +194,32 @@ class PixelContrastLoss(nn.Module):
         selected_indices = selected_indices.reshape([batch_size, h, w])
         return selected_indices
 
-    def forward(self, feats, masks=None, cams=None):
-        masks = F.interpolate(masks.float(), feats.size()[2:], mode='nearest')
-        masks = masks.squeeze(1).long()
+    def forward(self, feat_embeddings, masks=None, cams=None):
+        # masks = F.interpolate(masks.float(), feats.size()[2:], mode='nearest')
+        # masks = masks.squeeze(1).long()
 
-        cams = F.interpolate(cams.unsqueeze(1).float(), feats.size()[2:], mode='bicubic', align_corners=True)
-        cams = cams.squeeze(1)
+        contrast_loss = 0.0
+        for layer, feats in feat_embeddings.items():
+            cam = F.interpolate(cams[layer], feats.size()[2:], mode='bicubic', align_corners=True)
+            cam = cam.squeeze(1)
 
-        feats = feats.permute(0, 2, 3, 1)
+            feats = feats.permute(0, 2, 3, 1)
 
-        selected_pixels = PixelContrastLoss.pixel_sampling(cams, self.num_samples)
+            selected_pixels = PixelContrastLoss.pixel_sampling(cam, self.num_samples)
 
-        indices = (selected_pixels == 1).nonzero(as_tuple=False)
-        fg_feats = [feats[index[0], index[1], index[2], :] for index in indices]
-        fg_feats = torch.stack(fg_feats, dim=0)
-        fg_labels = torch.ones(fg_feats.shape[0])
+            indices = (selected_pixels == 1).nonzero(as_tuple=False)
+            fg_feats = [feats[index[0], index[1], index[2], :] for index in indices]
+            fg_feats = torch.stack(fg_feats, dim=0)
+            fg_labels = torch.ones(fg_feats.shape[0])
 
-        indices = (selected_pixels == 0).nonzero(as_tuple=False)
-        bg_feats = [feats[index[0], index[1], index[2], :] for index in indices]
-        bg_feats = torch.stack(bg_feats, dim=0)
-        bg_labels = torch.zeros(bg_feats.shape[0])
+            indices = (selected_pixels == 0).nonzero(as_tuple=False)
+            bg_feats = [feats[index[0], index[1], index[2], :] for index in indices]
+            bg_feats = torch.stack(bg_feats, dim=0)
+            bg_labels = torch.zeros(bg_feats.shape[0])
 
-        all_feats = torch.cat([fg_feats, bg_feats], dim=0).unsqueeze(1)
-        all_labels = torch.cat([fg_labels, bg_labels], dim=0)
+            all_feats = torch.cat([fg_feats, bg_feats], dim=0).unsqueeze(1)
+            all_labels = torch.cat([fg_labels, bg_labels], dim=0)
 
-        contrast_loss = self._contrastive(all_feats, all_labels)
+            contrast_loss += self._contrastive(all_feats, all_labels)
+        contrast_loss /= len(feat_embeddings.keys())
         return contrast_loss

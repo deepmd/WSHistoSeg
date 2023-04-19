@@ -2,6 +2,7 @@ import sys
 import os
 from glob import glob
 import numpy as np
+import cv2
 
 import torch
 
@@ -32,6 +33,8 @@ if __name__=='__main__':
     cam_files = glob(os.path.join(cams_dir, "*.npy"))
     for cam_num, cam_file in enumerate(cam_files, start=1):
         cam = np.load(cam_file)
+        mask = np.ones_like(cam)
+        mask[cam <= 0.5] = 0
         # cam = (cam - cam.min()) / (cam.max() - cam.min())
         # mask = np.ones_like(cam) * 255
         # mask[cam > 0.5] = 1
@@ -39,9 +42,9 @@ if __name__=='__main__':
         # mask = get_pseudo_binary_mask(torch.from_numpy(cam), w, sigma).numpy()
         # mask = Image.fromarray(mask, "L")
 
-        mask_name = os.path.basename(cam_file).replace('.bmp', '_anno')
+        mask_name = os.path.basename(cam_file).replace('.npy', '_mask.png')
         mask_path = os.path.join(masks_dir, mask_name)
-        np.save(mask_path, cam)
+        cv2.imwrite(mask_path, mask * 255)
 
         print(f"{cam_num}/{len(cam_files)}")
 
