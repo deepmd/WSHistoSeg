@@ -9,7 +9,8 @@ from .STDCLModel import STDCLModel
 def create_model(cfg):
     logger = cfg.logger
     model = STDCLModel(encoder_name=cfg.encoder_name,
-                       num_classes=cfg.num_classes, proj_dim=cfg.proj_dim)
+                       num_classes=cfg.num_classes, output_layer_numbers=cfg.output_layer_numbers,
+                       proj_dim=cfg.proj_dim)
 
     if cfg.pretrained is not None:
         logger.info(f"Loading pretrain weights '{cfg.pretrained}'")

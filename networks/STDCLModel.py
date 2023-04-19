@@ -32,13 +32,14 @@ class WGAP(nn.Module):
 
 
 class STDCLModel(nn.Module):
-    def __init__(self, encoder_name, num_classes, depth=5, proj_dim=128):
+    def __init__(self, encoder_name, num_classes, output_layer_numbers, depth=5, proj_dim=128):
         super().__init__()
 
         encoder = encoders[encoder_name]['encoder']
         encoder_params = encoders[encoder_name]['params']
         encoder_params.update(depth=depth)
         self.encoder = encoder(**encoder_params)
+        self.output_layer_numbers = list(map(int, list(output_layer_numbers)))
 
         # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
 
@@ -50,7 +51,19 @@ class STDCLModel(nn.Module):
             nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
         )
 
-        self.proj_head = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+        self.proj_head = dict()
+        if 4 in self.output_layer_numbers:
+            in_channels = encoder_params['out_channels'][-1]
+            self.proj_head_layer4 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+        if 3 in self.output_layer_numbers:
+            in_channels = encoder_params['out_channels'][-2]
+            self.proj_head_layer3 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+        if 2 in self.output_layer_numbers:
+            in_channels = encoder_params['out_channels'][-3]
+            self.proj_head_layer2 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+        if 1 in self.output_layer_numbers:
+            in_channels = encoder_params['out_channels'][-4]
+            self.proj_head_layer1 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
 
         # self.initialize()
 
@@ -62,5 +75,15 @@ class STDCLModel(nn.Module):
         features = self.encoder(x)
         # cl_logits = self.classification_head(features[-1])
         seg = self.seg_head(features[-1])
-        embed = self.proj_head(features[-1])
+
+        embed = dict()
+        if 4 in self.output_layer_numbers:
+            embed['layer4'] = self.proj_head_layer4(features[-1])
+        if 3 in self.output_layer_numbers:
+            embed['layer3'] = self.proj_head_layer3(features[-2])
+        if 2 in self.output_layer_numbers:
+            embed['layer2'] = self.proj_head_layer2(features[-3])
+        if 1 in self.output_layer_numbers:
+            embed['layer1'] = self.proj_head_layer1(features[-4])
+
         return {'seg': seg, 'embed': embed}

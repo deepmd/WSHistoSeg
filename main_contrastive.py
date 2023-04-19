@@ -40,6 +40,8 @@ def parse_options():
                         help='above this threshold was considered as foreground.')
     parser.add_argument('--back_threshold', type=float, default=-1,
                         help='below this threshold was considered as foreground.')
+    parser.add_argument('--output_layer_numbers', type=str, default='1234',
+                        help='layer numbers from which extracted cams are used for training.')
 
     # optimization
     parser.add_argument('--optimizer', type=str, default='SGD', choices=['SGD', 'Adam'], help='optimizer')
@@ -122,7 +124,8 @@ def set_loader(opt):
             use_pseudo_masks=opt.use_pseudo_mask if split == 'train' else False,
             fore_threshold=opt.fore_threshold,
             back_threshold=opt.back_threshold,
-            ignore_index=opt.ignore_index
+            ignore_index=opt.ignore_index,
+            output_layer_numbers=opt.output_layer_numbers,
         )
         for split in ['train', 'valcl', 'test']
     }
@@ -177,7 +180,7 @@ def validate(model, val_loader, criterion, opt):
         for idx, data_dict in enumerate(tqdm(val_loader)):
             bsz = data_dict['image'].size(0)
             images = data_dict['image'].to(opt.device)
-            gt_masks = data_dict['mask'].to(opt.device)
+            gt_masks = data_dict['mask']['layer4'].to(opt.device)
 
             logits = model(images)
             # loss, _ = criterion(logits, gt_masks)
@@ -220,7 +223,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
 
         bsz = data_dict['image'].size(0)
         images = data_dict['image'].to(opt.device)
-        gt_masks = data_dict['mask'].to(opt.device)
+        gt_masks = data_dict['mask']['layer4'].to(opt.device)
         cams = data_dict['cam']
 
         # compute loss
