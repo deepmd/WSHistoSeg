@@ -199,6 +199,9 @@ class PixelContrastLoss(nn.Module):
         # masks = masks.squeeze(1).long()
 
         contrast_loss = 0.0
+        if not isinstance(feat_embeddings, dict):
+            feat_embeddings = {"layer4": feat_embeddings}
+
         for layer, feats in feat_embeddings.items():
             cam = F.interpolate(cams[layer], feats.size()[2:], mode='bicubic', align_corners=True)
             cam = cam.squeeze(1)

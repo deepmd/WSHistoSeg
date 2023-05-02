@@ -4,13 +4,22 @@ import os.path
 import torch
 
 from .STDCLModel import STDCLModel
+from .unet import UnetNEGEV
 
 
 def create_model(cfg):
     logger = cfg.logger
-    model = STDCLModel(encoder_name=cfg.encoder_name,
-                       num_classes=cfg.num_classes, output_layer_numbers=cfg.output_layer_numbers,
-                       proj_dim=cfg.proj_dim)
+
+    model = None
+    if cfg.task.lower() == 'stdcl':
+        model = STDCLModel(encoder_name=cfg.encoder_name,
+                           num_classes=cfg.num_classes, output_layer_numbers=cfg.output_layer_numbers,
+                           proj_dim=cfg.proj_dim)
+    elif cfg.task.lower() == 'unet':
+        model = UnetNEGEV(encoder_name=cfg.encoder_name, seg_h_out_channels=2)
+    else:
+        logger.info(f"{cfg.model_name} model is not valid!")
+        raise ValueError(f"{cfg.model_name} model is not valid!")
 
     if cfg.pretrained is not None:
         logger.info(f"Loading pretrain weights '{cfg.pretrained}'")

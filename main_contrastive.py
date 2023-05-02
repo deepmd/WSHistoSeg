@@ -30,6 +30,7 @@ def parse_options():
 
     # model, dataset
     parser.add_argument('--data_root', type=str, default=None, help='path to dataset')
+    parser.add_argument('--task', type=str, default='stdcl', choices=['stdcl', 'unet'])
     parser.add_argument('--encoder_name', type=str, default='resnet50', choices=['resnet50'])
     parser.add_argument('--proj_dim', type=int, default=128, help='num of channels in output of projection head')
     parser.add_argument('--num_classes', type=int, default=2, help='number of classes.')
@@ -62,7 +63,7 @@ def parse_options():
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
-    parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
+    parser.add_argument('--max_iters', type=int, default=4000, help='max epochs for training.')
     parser.add_argument('--contrast_warmup_iters', type=int, default=0, help='warmup iterations for training.')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
@@ -93,7 +94,7 @@ def parse_options():
     #                  f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE-Contrast_trial_{opt.trial}"
 
     opt.model_name = f"glas_model_{opt.encoder_name}_{opt.optimizer}" + \
-                     f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE_trial_{opt.trial}"
+                     f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE_CL_trial_{opt.trial}"
 
     save_path = os.path.join("./save", opt.model_name)
 
@@ -227,9 +228,9 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
         cams = data_dict['cam']
 
         # compute loss
-        logits = model(images)
+        outputs = model(images)
         with_embed = True if opt.current_iter >= opt.contrast_warmup_iters else False
-        loss, partial_losses = criterion(logits, gt_masks, cams, with_embed=with_embed)
+        loss, partial_losses = criterion(outputs, gt_masks, cams, with_embed=with_embed)
 
         with torch.no_grad():
             losses.update(loss.item(), bsz)
