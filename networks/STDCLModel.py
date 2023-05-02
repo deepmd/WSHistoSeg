@@ -31,6 +31,22 @@ class WGAP(nn.Module):
         return logits
 
 
+# class SegHead(nn.Module):
+#     def __init__(self, in_channels, out_channels):
+#         super(SegHead, self).__init__()
+#         self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+#         self.bn_relu = BNReLU(in_channels, bn_type='torchbn')
+#         self.dropout = nn.Dropout2d(0.10)
+#         self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
+#
+#     def forward(self, x):
+#         x = self.conv1(x)
+#         out = x = self.bn_relu(x)
+#         x = self.dropout(x)
+#         x = self.conv2(x)
+#         return x, out
+
+
 class STDCLModel(nn.Module):
     def __init__(self, encoder_name, num_classes, output_layer_numbers, depth=5, proj_dim=128):
         super().__init__()
@@ -44,6 +60,7 @@ class STDCLModel(nn.Module):
         # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
 
         in_channels = encoder_params['out_channels'][-1]
+        # self.seg_head = SegHead(in_channels, num_classes)
         self.seg_head = nn.Sequential(
             nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
             BNReLU(in_channels, bn_type='torchbn'),
@@ -74,11 +91,12 @@ class STDCLModel(nn.Module):
     def forward(self, x):
         features = self.encoder(x)
         # cl_logits = self.classification_head(features[-1])
-        seg = self.seg_head(features[-1])
+        seg, out_decoder = self.seg_head(features[-1])
 
         embed = dict()
         if 4 in self.output_layer_numbers:
             embed['layer4'] = self.proj_head_layer4(features[-1])
+            # embed['layer4'] = self.proj_head_layer4(out_decoder)
         if 3 in self.output_layer_numbers:
             embed['layer3'] = self.proj_head_layer3(features[-2])
         if 2 in self.output_layer_numbers:
