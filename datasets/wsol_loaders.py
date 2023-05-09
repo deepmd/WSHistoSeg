@@ -164,6 +164,13 @@ class WsolDataset(Dataset):
         if self.use_pseudo_masks:
             for layer_name, cam in cams.items():
                 if cam is not None:
+                    # cam = (cam - cam.min())/(cam.max() - cam.min())
+                    reshaped_cam = cam.reshape(cam.size()[0], -1)
+                    sorted_cam = torch.sort(reshaped_cam, dim=1)[0]
+                    x = int(0.2 * sorted_cam.size()[1])
+                    self.fore_threshold = sorted_cam[0, -x]
+                    self.back_threshold = sorted_cam[0, x]
+
                     mask = torch.ones_like(cam) * self.ignore_index
                     if self.fore_threshold != -1:
                         mask[cam > self.fore_threshold] = 1
