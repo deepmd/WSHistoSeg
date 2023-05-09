@@ -43,6 +43,8 @@ def parse_options():
                         help='below this threshold was considered as foreground.')
     parser.add_argument('--output_layer_numbers', type=str, default='1234',
                         help='layer numbers from which extracted cams are used for training.')
+    parser.add_argument("--use_aspp", dest="use_aspp", action="store_true",
+                        help="use aspp module at the esnd of encoder.")
 
     # optimization
     parser.add_argument('--optimizer', type=str, default='SGD', choices=['SGD', 'Adam'], help='optimizer')
@@ -63,7 +65,7 @@ def parse_options():
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
-    parser.add_argument('--max_iters', type=int, default=4000, help='max epochs for training.')
+    parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
     parser.add_argument('--contrast_warmup_iters', type=int, default=0, help='warmup iterations for training.')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
@@ -194,7 +196,8 @@ def validate(model, val_loader, criterion, opt):
             #     gt_masks = F.interpolate(gt_masks.float(), logits_seg.size()[2:], mode='nearest')
 
             # preds = torch.argmax(logits_seg, dim=1)
-            logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(np.float)
+            # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
+            logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
             mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
             evaluator.accumulate(logits_seg, mask)
 
@@ -230,6 +233,16 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
         # compute loss
         outputs = model(images)
         with_embed = True if opt.current_iter >= opt.contrast_warmup_iters else False
+
+        # if opt.best_val_pxap['test'] > 76:
+        #     masks = torch.softmax(outputs['seg'], dim=1)[:, 1, :, :]
+        #     masks = torch.nan_to_num(masks, nan=0.0, posinf=1., neginf=0.0)
+        #     masks = F.interpolate(masks.unsqueeze(1), gt_masks.size()[2:], mode='bilinear', align_corners=True)
+        #     gt_masks = torch.zeros_like(gt_masks).to(gt_masks.device)
+        #     gt_masks[masks > 0.5] = 1
+        #
+        #     cams = {'layer4': masks}
+
         loss, partial_losses = criterion(outputs, gt_masks, cams, with_embed=with_embed)
 
         with torch.no_grad():
@@ -279,15 +292,16 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
                 # add info to tensorboard
                 opt.tb_logger.add_scalar(f'{split}/PXAP', metrics['PXAP'], opt.current_iter)
 
-                if split == 'valcl' and metrics['PXAP'] > opt.best_val_pxap:
-                    opt.best_val_pxap = metrics['PXAP']
+                if metrics['PXAP'] > opt.best_val_pxap[split]:
+                    opt.best_val_pxap[split] = metrics['PXAP']
                     # save model
-                    save_file = os.path.join(
-                        opt.save_folder, 'ckpt_iteration_{iteration}_{pxap}.pth'.format(iteration=opt.current_iter,
-                                                                                pxap=metrics['PXAP']))
+                    filename = f"ckpt_{split}_iter_{opt.current_iter}_{metrics['PXAP']}.pth"
+                    save_file = os.path.join(opt.save_folder, filename)
                     if opt.current_iter % opt.max_iters == 0:
-                        save_file = os.path.join(opt.save_folder, 'last_{pxap}.pth'.format(pxap=metrics['PXAP']))
+                        save_file = os.path.join(opt.save_folder, f"last_{metrics['PXAP']}.pth")
                     save_checkpoint(model, optimizer, opt, opt.current_iter, save_file)
+
+                opt.logger.info(f"[BEST PXAP on {split.upper()}={opt.best_val_pxap[split]}]")
 
             # changing the phase of the model to train
             model.train()
@@ -335,17 +349,21 @@ def main():
     # training routine
     opt.current_epoch = 0
     opt.current_iter = 0
-    opt.best_val_pxap = -1
+    opt.best_val_pxap = {'valcl': -1, 'test': -1}
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
         loss, ce_loss, contrast_loss = train_validate(model, criterion, data_loaders, optimizer, scheduler, opt)
         time2 = time.time()
-        logger.info(f"[End Epoch {opt.current_epoch-1}] Train Time: {(time2 - time1):0.2f}, " +
-                    f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f})")
+        opt.logger.info(f"[End Epoch {opt.current_epoch - 1}] Train Time: {(time2 - time1):0.2f}, " +
+                        f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f})")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/ce_loss_avg', ce_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
+
+    opt.logger.info(f"[End of training]:\n "
+                    f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "
+                    f"BEST PXAP on TEST={opt.best_val_pxap['test']}")
 
 
 if __name__ == '__main__':

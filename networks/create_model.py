@@ -14,7 +14,7 @@ def create_model(cfg):
     if cfg.task.lower() == 'stdcl':
         model = STDCLModel(encoder_name=cfg.encoder_name,
                            num_classes=cfg.num_classes, output_layer_numbers=cfg.output_layer_numbers,
-                           proj_dim=cfg.proj_dim)
+                           proj_dim=cfg.proj_dim, use_aspp=cfg.use_aspp)
     elif cfg.task.lower() == 'unet':
         model = UnetNEGEV(encoder_name=cfg.encoder_name, seg_h_out_channels=2)
     else:

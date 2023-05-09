@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .resnet import resnet_encoders
 import networks.initialization as init
 from networks.modules import BNReLU, ProjectionHead
+from networks.aspp import ASPP
 
 
 encoders = {}
@@ -48,7 +49,7 @@ class WGAP(nn.Module):
 
 
 class STDCLModel(nn.Module):
-    def __init__(self, encoder_name, num_classes, output_layer_numbers, depth=5, proj_dim=128):
+    def __init__(self, encoder_name, num_classes, output_layer_numbers, depth=5, proj_dim=128, use_aspp=False):
         super().__init__()
 
         encoder = encoders[encoder_name]['encoder']
@@ -59,14 +60,19 @@ class STDCLModel(nn.Module):
 
         # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
 
-        in_channels = encoder_params['out_channels'][-1]
-        # self.seg_head = SegHead(in_channels, num_classes)
-        self.seg_head = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
-            BNReLU(in_channels, bn_type='torchbn'),
-            nn.Dropout2d(0.10),
-            nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
-        )
+        self.use_aspp = use_aspp
+        if self.use_aspp:
+            self.aspp = ASPP(encoder_name, output_stride=8, BatchNorm=nn.BatchNorm2d)
+            self.seg_head = nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+        else:
+            in_channels = encoder_params['out_channels'][-1]
+            # self.seg_head = SegHead(in_channels, num_classes)
+            self.seg_head = nn.Sequential(
+                nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+                BNReLU(in_channels, bn_type='torchbn'),
+                nn.Dropout2d(0.10),
+                nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+            )
 
         self.proj_head = dict()
         if 4 in self.output_layer_numbers:
@@ -91,7 +97,12 @@ class STDCLModel(nn.Module):
     def forward(self, x):
         features = self.encoder(x)
         # cl_logits = self.classification_head(features[-1])
-        seg, out_decoder = self.seg_head(features[-1])
+        if self.use_aspp:
+            x = self.aspp(features[-1])
+            seg = self.seg_head(x)
+        else:
+            # seg, out_decoder = self.seg_head(features[-1])
+            seg = self.seg_head(features[-1])
 
         embed = dict()
         if 4 in self.output_layer_numbers:
