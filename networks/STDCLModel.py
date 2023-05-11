@@ -61,22 +61,29 @@ class STDCLModel(nn.Module):
         # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
 
         self.use_aspp = use_aspp
+        in_channels = encoder_params['out_channels'][-1]
         if self.use_aspp:
             self.aspp = ASPP(encoder_name, output_stride=8, BatchNorm=nn.BatchNorm2d)
-            self.seg_head = nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+            self.seg_head = nn.Sequential(
+                nn.Conv2d(1280, 256, kernel_size=1, stride=1, padding=0, bias=False),
+                BNReLU(256, bn_type='torchbn'),
+                nn.Dropout2d(0.10),
+                nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+            )
         else:
-            in_channels = encoder_params['out_channels'][-1]
-            # self.seg_head = SegHead(in_channels, num_classes)
             self.seg_head = nn.Sequential(
                 nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
                 BNReLU(in_channels, bn_type='torchbn'),
                 nn.Dropout2d(0.10),
                 nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
             )
+            # self.seg_head = SegHead(in_channels, num_classes)
 
         self.proj_head = dict()
         if 4 in self.output_layer_numbers:
-            in_channels = encoder_params['out_channels'][-1]
+            # in_channels = encoder_params['out_channels'][-1]
+            # self.aspp_cl = ASPP(encoder_name, output_stride=8, BatchNorm=nn.BatchNorm2d)
+            in_channels = 1280
             self.proj_head_layer4 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
         if 3 in self.output_layer_numbers:
             in_channels = encoder_params['out_channels'][-2]
@@ -97,16 +104,15 @@ class STDCLModel(nn.Module):
     def forward(self, x):
         features = self.encoder(x)
         # cl_logits = self.classification_head(features[-1])
+        x = features[-1]
         if self.use_aspp:
-            x = self.aspp(features[-1])
-            seg = self.seg_head(x)
-        else:
-            # seg, out_decoder = self.seg_head(features[-1])
-            seg = self.seg_head(features[-1])
+            x = self.aspp(x)
+        seg = self.seg_head(x)
 
         embed = dict()
         if 4 in self.output_layer_numbers:
-            embed['layer4'] = self.proj_head_layer4(features[-1])
+            # x = self.aspp_cl(features[-1])
+            embed['layer4'] = self.proj_head_layer4(x)
             # embed['layer4'] = self.proj_head_layer4(out_decoder)
         if 3 in self.output_layer_numbers:
             embed['layer3'] = self.proj_head_layer3(features[-2])

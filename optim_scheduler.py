@@ -4,7 +4,7 @@ from torch.optim import SGD, Adam, lr_scheduler
 def _get_model_params_for_opt(cfg, model):
     _FEATURE_PARAM_LAYER_PATTERNS = {
         'vgg': ['encoder.features.'],  # features
-        'resnet': ['encoder.layer4.', 'classification_head.', 'seg_head.', 'aspp.'],  # CLASSIFIER
+        'resnet': ['encoder.layer4.', 'classification_head.', 'seg_head.', 'aspp.', 'aspp_cl.'],  # CLASSIFIER
         'inception': ['encoder.Mixed', 'encoder.Conv2d_1',
                       'encoder.Conv2d_2',
                       'encoder.Conv2d_3', 'encoder.Conv2d_4'],  # features

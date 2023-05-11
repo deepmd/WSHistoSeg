@@ -60,10 +60,10 @@ class ASPP(nn.Module):
                                              nn.Conv2d(inplanes, 256, 1, stride=1, bias=False),
                                              BatchNorm(256),
                                              nn.ReLU())
-        self.conv1 = nn.Conv2d(1280, 256, 1, bias=False)
-        self.bn1 = BatchNorm(256)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.1)
+        # self.conv1 = nn.Conv2d(1280, 256, 1, bias=False)
+        # self.bn1 = BatchNorm(256)
+        # self.relu = nn.ReLU()
+        # self.dropout = nn.Dropout(0.1)
         self._init_weight()
 
     def forward(self, x):
@@ -75,11 +75,11 @@ class ASPP(nn.Module):
         x5 = F.interpolate(x5, size=x4.size()[2:], mode='bilinear', align_corners=True)
         x = torch.cat((x1, x2, x3, x4, x5), dim=1)
 
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-
-        return self.dropout(x)
+        # x = self.conv1(x)
+        # x = self.bn1(x)
+        # x = self.relu(x)
+        # x = self.dropout(x)
+        return x
 
     def _init_weight(self):
         for m in self.modules():
