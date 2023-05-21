@@ -17,7 +17,7 @@ from datasets import get_transforms
 from optim_scheduler import get_optim_scheduler
 from losses import ContrastCELoss
 from utils import AverageMeter
-from metrics import ConfMatrix
+# from metrics import ConfMatrix
 # from networks.sync_batchnorm import convert_model, DataParallelWithCallback
 
 from datasets.wsol_loaders import WsolDataset
@@ -37,12 +37,6 @@ def parse_options():
     parser.add_argument('--pretrained', type=str, default=None, help='path to pretrained weights.')
     parser.add_argument('--use_pseudo_mask', dest="use_pseudo_mask", action='store_true',
                         help='using pseudo masks for training.')
-    parser.add_argument('--fore_threshold', type=float, default=-1,
-                        help='above this threshold was considered as foreground.')
-    parser.add_argument('--back_threshold', type=float, default=-1,
-                        help='below this threshold was considered as foreground.')
-    parser.add_argument('--output_layer_numbers', type=str, default='1234',
-                        help='layer numbers from which extracted cams are used for training.')
     parser.add_argument("--use_aspp", dest="use_aspp", action="store_true",
                         help="use aspp module at the esnd of encoder.")
 
@@ -60,13 +54,11 @@ def parse_options():
     parser.add_argument("--temperature", type=float, default=0.1, help="temperature in contrastive loss.")
     parser.add_argument("--base_temperature", type=float, default=0.07, help="base temperature in contrastive loss.")
     parser.add_argument('--num_samples', type=int, default=10, help='max samples')
-    # parser.add_argument('--max_views', type=int, default=100, help='max views')
 
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
-    parser.add_argument('--contrast_warmup_iters', type=int, default=0, help='warmup iterations for training.')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
     parser.add_argument('--crop_size', type=int, default=224, help='crop size')
@@ -80,20 +72,8 @@ def parse_options():
 
     opt = parser.parse_args()
 
-    # train_data_transformer = dict(size_mode="fix_size", input_size=[1024, 512],
-    #                               align_method="only_pad", pad_mode="random")
-    # val_data_transformer = dict(size_mode="fix_size", input_size=[2048, 1024],
-    #                             align_method="only_pad")
-    # opt.data_transformer = dict(train=train_data_transformer, val=val_data_transformer)
-
-    # opt.ce_weights = [0.8373, 0.9180, 0.8660, 1.0345, 1.0166, 0.9969, 0.9754,
-    #                   1.0489, 0.8786, 1.0023, 0.9539, 0.9843, 1.1116, 0.9037,
-    #                   1.0865, 1.0955, 1.0865, 1.1529, 1.0507]
     opt.ce_weights = [1.0, 1.0]
     opt.ignore_index = -1
-
-    # opt.model_name = f"glas_model_{opt.model}_{opt.optimizer}_syncbn_{opt.syncBN}" + \
-    #                  f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE-Contrast_trial_{opt.trial}"
 
     opt.model_name = f"glas_model_{opt.encoder_name}_{opt.optimizer}" + \
                      f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE_CL_trial_{opt.trial}"
@@ -123,12 +103,7 @@ def set_loader(opt):
         split: WsolDataset(
             data_root=opt.data_root,
             metadata_root=os.path.join(opt.metadata_root, split),
-            transforms=data_transforms[split],
-            use_pseudo_masks=opt.use_pseudo_mask if split == 'train' else False,
-            fore_threshold=opt.fore_threshold,
-            back_threshold=opt.back_threshold,
-            ignore_index=opt.ignore_index,
-            output_layer_numbers=opt.output_layer_numbers,
+            transforms=data_transforms[split]
         )
         for split in ['train', 'valcl', 'test']
     }
@@ -175,38 +150,26 @@ def validate(model, val_loader, criterion, opt):
     model.eval()
     criterion.eval()
 
-    losses = AverageMeter()
     # metrics = ConfMatrix(opt.num_classes)
     evaluator = MaskEvaluation(cam_curve_interval=0.001)
 
     with torch.no_grad():
         for idx, data_dict in enumerate(tqdm(val_loader)):
-            bsz = data_dict['image'].size(0)
             images = data_dict['image'].to(opt.device)
-            gt_masks = data_dict['mask']['layer4'].to(opt.device)
+            gt_masks = data_dict['mask'].to(opt.device)
 
             logits = model(images)
-            # loss, _ = criterion(logits, gt_masks)
 
             logits_seg = logits['seg']
             if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
                 logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:],
                                            mode='bicubic', align_corners=True)
-            # if list(gt_masks.shape[2:]) != list(logits_seg.shape[2:]):
-            #     gt_masks = F.interpolate(gt_masks.float(), logits_seg.size()[2:], mode='nearest')
-
-            # preds = torch.argmax(logits_seg, dim=1)
-            # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
             logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
             mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
             evaluator.accumulate(logits_seg, mask)
 
-        # losses.update(loss.item(), bsz)
         pxap = evaluator.compute()
         results = evaluator.perf_gist
-        # class_ious_dict, pixel_acc_dict = metrics.get_metrics()
-        # class_ious = class_ious_dict['19cls']
-        # pixel_acc = pixel_acc_dict['19cls']
 
     return results
 
@@ -222,17 +185,18 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
     contrast_losses = AverageMeter()
 
     end = time.time()
+    total_corrects = [0, 0]
     for data_dict in data_loaders['train']:
         data_time.update(time.time() - end)
 
         bsz = data_dict['image'].size(0)
         images = data_dict['image'].to(opt.device)
-        gt_masks = data_dict['mask']['layer4'].to(opt.device)
+        labels = data_dict['label'].to(opt.device)
+        masks = data_dict['mask'].to(opt.device)
         cams = data_dict['cam']
 
         # compute loss
         outputs = model(images)
-        with_embed = True if opt.current_iter >= opt.contrast_warmup_iters else False
 
         # if opt.best_val_pxap['test'] > 76:
         #     masks = torch.softmax(outputs['seg'], dim=1)[:, 1, :, :]
@@ -243,7 +207,16 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
         #
         #     cams = {'layer4': masks}
 
-        loss, partial_losses = criterion(outputs, gt_masks, cams, with_embed=with_embed)
+        # if opt.best_val_pxap['test'] > 80:
+        #     image_size = images.size()[2:]
+        #     cams = torch.sigmoid(outputs['seg'][:, 1]).unsqueeze(1)  # .astype(float)
+        #     # cams = torch.nan_to_num(cams, nan=0.0, posinf=1., neginf=0.0)
+        #     cams = F.interpolate(cams, image_size, mode='bicubic', align_corners=True)
+        #     cams = {'layer4': cams}
+
+        loss, partial_losses, num_corrects = criterion(outputs, cams, masks, labels, opt.use_pseudo_mask)
+        total_corrects[0] += num_corrects[0]
+        total_corrects[1] += num_corrects[1]
 
         with torch.no_grad():
             losses.update(loss.item(), bsz)
@@ -312,7 +285,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
 
     opt.current_epoch += 1
 
-    return losses.avg, ce_losses.avg, contrast_losses.avg
+    return losses.avg, ce_losses.avg, contrast_losses.avg, total_corrects
 
 
 def main():
@@ -353,13 +326,19 @@ def main():
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
-        loss, ce_loss, contrast_loss = train_validate(model, criterion, data_loaders, optimizer, scheduler, opt)
+        loss, ce_loss, contrast_loss, total_corrects = train_validate(model, criterion, data_loaders,
+                                                                      optimizer, scheduler, opt)
         time2 = time.time()
+        CoFG = total_corrects[0] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
+        CoBG = total_corrects[1] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
         opt.logger.info(f"[End Epoch {opt.current_epoch - 1}] Train Time: {(time2 - time1):0.2f}, " +
-                        f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f})")
+                        f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) " +
+                        f"CoFG: {CoFG:.3f}, CoBG: {CoBG:.3f}")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/ce_loss_avg', ce_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoFG', CoFG, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoBG', CoBG, opt.current_epoch)
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "

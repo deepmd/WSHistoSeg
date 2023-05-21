@@ -44,15 +44,14 @@ class Compose(object):
         if isinstance(transf, RandomCrop):
             return True
 
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1):
+    def __call__(self, img, raw_img, cam, mask):
         for t in self.transforms:
             if isinstance(t, (RandomHorizontalFlip, RandomVerticalFlip, RandomCrop, Resize)):
-                img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1 = \
-                    t(img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1)
+                img, raw_img, cam, mask = t(img, raw_img, cam, mask)
             else:
                 img = t(img)
 
-        return img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1
+        return img, raw_img, cam, mask
 
     def __repr__(self):
         format_string = self.__class__.__name__ + '('
@@ -64,8 +63,7 @@ class Compose(object):
 
 
 class _BasicTransform(object):
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1,
-                 mask4, mask3, mask2, mask1):
+    def __call__(self, img, raw_img, cam, mask):
         raise NotImplementedError
 
 
@@ -73,46 +71,20 @@ class RandomHorizontalFlip(_BasicTransform):
     def __init__(self, p=PROB_THRESHOLD):
         self.p = p
 
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1,
-                 mask4, mask3, mask2, mask1):
+    def __call__(self, img, raw_img, cam, mask):
         if random.random() < self.p:
 
-            std_cam4_ = std_cam4
-            if std_cam4_ is not None:
-                std_cam4_ = TF.hflip(std_cam4)
+            cam_ = cam
+            if cam_ is not None:
+                cam_ = TF.hflip(cam_)
 
-            std_cam3_ = std_cam3
-            if std_cam3_ is not None:
-                std_cam3_ = TF.hflip(std_cam3)
+            mask_ = mask
+            if mask_ is not None:
+                mask_ = TF.hflip(mask_)
 
-            std_cam2_ = std_cam2
-            if std_cam2_ is not None:
-                std_cam2_ = TF.hflip(std_cam2)
+            return TF.hflip(img), TF.hflip(raw_img), cam_, mask_
 
-            std_cam1_ = std_cam1
-            if std_cam1_ is not None:
-                std_cam1_ = TF.hflip(std_cam1)
-
-            mask4_ = mask4
-            if mask4_ is not None:
-                mask4_ = TF.hflip(mask4_)
-
-            mask3_ = mask3
-            if mask3_ is not None:
-                mask3_ = TF.hflip(mask3_)
-
-            mask2_ = mask2
-            if mask2_ is not None:
-                mask2_ = TF.hflip(mask2_)
-
-            mask1_ = mask1
-            if mask1_ is not None:
-                mask1_ = TF.hflip(mask1_)
-
-            return TF.hflip(img), TF.hflip(raw_img), std_cam4_, std_cam3_, std_cam2_, std_cam1_,\
-                   mask4_, mask3_, mask2_, mask1_
-
-        return img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1
+        return img, raw_img, cam, mask
 
     def __repr__(self):
         return self.__class__.__name__ + '(p={})'.format(self.p)
@@ -122,46 +94,19 @@ class RandomVerticalFlip(_BasicTransform):
     def __init__(self, p=PROB_THRESHOLD):
         self.p = p
 
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1,
-                 mask4, mask3, mask2, mask1):
+    def __call__(self, img, raw_img, cam, mask):
         if random.random() < self.p:
+            cam_ = cam
+            if cam_ is not None:
+                cam_ = TF.vflip(cam_)
 
-            std_cam4_ = std_cam4
-            if std_cam4_ is not None:
-                std_cam4_ = TF.vflip(std_cam4)
+            mask_ = mask
+            if mask_ is not None:
+                mask_ = TF.vflip(mask_)
 
-            std_cam3_ = std_cam3
-            if std_cam3_ is not None:
-                std_cam3_ = TF.vflip(std_cam3)
+            return TF.vflip(img), TF.vflip(raw_img), cam_, mask_
 
-            std_cam2_ = std_cam2
-            if std_cam2_ is not None:
-                std_cam2_ = TF.vflip(std_cam2)
-
-            std_cam1_ = std_cam1
-            if std_cam1_ is not None:
-                std_cam1_ = TF.vflip(std_cam1)
-
-            mask4_ = mask4
-            if mask4_ is not None:
-                mask4_ = TF.vflip(mask4_)
-
-            mask3_ = mask3
-            if mask3_ is not None:
-                mask3_ = TF.vflip(mask3_)
-
-            mask2_ = mask2
-            if mask2_ is not None:
-                mask2_ = TF.vflip(mask2_)
-
-            mask1_ = mask1
-            if mask1_ is not None:
-                mask1_ = TF.vflip(mask1_)
-
-            return TF.vflip(img), TF.vflip(raw_img), std_cam4_, std_cam3_, std_cam2_, std_cam1_, \
-                   mask4_, mask3_, mask2_, mask1_
-
-        return img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1, mask4, mask3, mask2, mask1
+        return img, raw_img, cam, mask
 
     def __repr__(self):
         return self.__class__.__name__ + '(p={})'.format(self.p)
@@ -218,55 +163,23 @@ class RandomCrop(_BasicTransform):
 
         return img
 
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1,
-                 mask4, mask3, mask2, mask1):
+    def __call__(self, img, raw_img, cam, mask):
         img_ = self.forward(img)
         raw_img_ = self.forward(raw_img)
         assert img_.size == raw_img_.size
 
         i, j, h, w = self.get_params(img_, self.size)
-        std_cam4_ = std_cam4
-        if std_cam4_ is not None:
-            std_cam4_ = self.forward(std_cam4)
-            std_cam4_ = TF.crop(std_cam4_, i, j, h, w)
+        cam_ = cam
+        if cam_ is not None:
+            cam_ = self.forward(cam_)
+            cam_ = TF.crop(cam_, i, j, h, w)
 
-        std_cam3_ = std_cam3
-        if std_cam3_ is not None:
-            std_cam3_ = self.forward(std_cam3)
-            std_cam3_ = TF.crop(std_cam3_, i, j, h, w)
+        mask_ = mask
+        if mask_ is not None:
+            mask_ = self.forward(mask_)
+            mask_ = TF.crop(mask_, i, j, h, w)
 
-        std_cam2_ = std_cam2
-        if std_cam2_ is not None:
-            std_cam2_ = self.forward(std_cam2)
-            std_cam2_ = TF.crop(std_cam2_, i, j, h, w)
-
-        std_cam1_ = std_cam1
-        if std_cam1_ is not None:
-            std_cam1_ = self.forward(std_cam1)
-            std_cam1_ = TF.crop(std_cam1_, i, j, h, w)
-
-        mask4_ = mask4
-        if mask4 is not None:
-            mask4_ = self.forward(mask4_)
-            mask4_ = TF.crop(mask4_, i, j, h, w)
-
-        mask3_ = mask3
-        if mask3 is not None:
-            mask3_ = self.forward(mask3_)
-            mask3_ = TF.crop(mask3_, i, j, h, w)
-
-        mask2_ = mask2
-        if mask2 is not None:
-            mask2_ = self.forward(mask2_)
-            mask2_ = TF.crop(mask2_, i, j, h, w)
-
-        mask1_ = mask1
-        if mask1 is not None:
-            mask1_ = self.forward(mask1_)
-            mask1_ = TF.crop(mask1_, i, j, h, w)
-
-        return TF.crop(img_, i, j, h, w), TF.crop(
-            raw_img_, i, j, h, w), std_cam4_, std_cam3_, std_cam2_, std_cam1_, mask4_, mask3_, mask2_, mask1_
+        return TF.crop(img_, i, j, h, w), TF.crop(raw_img_, i, j, h, w), cam_, mask_
 
     def __repr__(self):
         return self.__class__.__name__ + "(size={0}, padding={1})".format(
@@ -286,43 +199,18 @@ class Resize(_BasicTransform):
         self.size = size
         self.interpolation = interpolation
 
-    def __call__(self, img, raw_img, std_cam4, std_cam3, std_cam2, std_cam1,
-                 mask4, mask3, mask2, mask1):
-        std_cam4_ = std_cam4
-        if std_cam4_ is not None:
-            std_cam4_ = TF.resize(std_cam4_, self.size, self.interpolation)
+    def __call__(self, img, raw_img, cam, mask):
+        cam_ = cam
+        if cam_ is not None:
+            cam_ = TF.resize(cam_, self.size, self.interpolation)
 
-        std_cam3_ = std_cam3
-        if std_cam3_ is not None:
-            std_cam3_ = TF.resize(std_cam3_, self.size, self.interpolation)
-
-        std_cam2_ = std_cam2
-        if std_cam2_ is not None:
-            std_cam2_ = TF.resize(std_cam2_, self.size, self.interpolation)
-
-        std_cam1_ = std_cam1
-        if std_cam1_ is not None:
-            std_cam1_ = TF.resize(std_cam1_, self.size, self.interpolation)
-
-        mask4_ = mask4
-        if mask4_ is not None:
-            mask4_ = TF.resize(mask4_, self.size, self.interpolation)
-
-        mask3_ = mask3
-        if mask3_ is not None:
-            mask3_ = TF.resize(mask3_, self.size, self.interpolation)
-
-        mask2_ = mask2
-        if mask2_ is not None:
-            mask2_ = TF.resize(mask2_, self.size, self.interpolation)
-
-        mask1_ = mask1
-        if mask1_ is not None:
-            mask1_ = TF.resize(mask1_, self.size, self.interpolation)
+        mask_ = mask
+        if mask_ is not None:
+            mask_ = TF.resize(mask_, self.size, self.interpolation)
+            # mask_ = TF.resize(mask_, self.size, TF.InterpolationMode.NEAREST)
 
         return TF.resize(img, self.size, self.interpolation), TF.resize(
-            raw_img, self.size, self.interpolation), std_cam4_, std_cam3_, std_cam2_, std_cam1_, \
-               mask4_, mask3_,  mask2_, mask1_
+            raw_img, self.size, self.interpolation), cam_, mask_
 
     def __repr__(self):
         interpolate_str = _pil_interpolation_to_str[self.interpolation]

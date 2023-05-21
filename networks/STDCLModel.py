@@ -49,14 +49,13 @@ class WGAP(nn.Module):
 
 
 class STDCLModel(nn.Module):
-    def __init__(self, encoder_name, num_classes, output_layer_numbers, depth=5, proj_dim=128, use_aspp=False):
+    def __init__(self, encoder_name, num_classes, depth=5, proj_dim=128, use_aspp=False):
         super().__init__()
 
         encoder = encoders[encoder_name]['encoder']
         encoder_params = encoders[encoder_name]['params']
         encoder_params.update(depth=depth)
         self.encoder = encoder(**encoder_params)
-        self.output_layer_numbers = list(map(int, list(output_layer_numbers)))
 
         # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
 
@@ -70,6 +69,7 @@ class STDCLModel(nn.Module):
                 nn.Dropout2d(0.10),
                 nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
             )
+            self.proj_head = ProjectionHead(dim_in=1280, proj_dim=proj_dim, proj='linear')
         else:
             self.seg_head = nn.Sequential(
                 nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
@@ -78,22 +78,7 @@ class STDCLModel(nn.Module):
                 nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
             )
             # self.seg_head = SegHead(in_channels, num_classes)
-
-        self.proj_head = dict()
-        if 4 in self.output_layer_numbers:
-            # in_channels = encoder_params['out_channels'][-1]
-            # self.aspp_cl = ASPP(encoder_name, output_stride=8, BatchNorm=nn.BatchNorm2d)
-            in_channels = 1280
-            self.proj_head_layer4 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
-        if 3 in self.output_layer_numbers:
-            in_channels = encoder_params['out_channels'][-2]
-            self.proj_head_layer3 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
-        if 2 in self.output_layer_numbers:
-            in_channels = encoder_params['out_channels'][-3]
-            self.proj_head_layer2 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
-        if 1 in self.output_layer_numbers:
-            in_channels = encoder_params['out_channels'][-4]
-            self.proj_head_layer1 = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+            self.proj_head = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
 
         # self.initialize()
 
@@ -108,17 +93,5 @@ class STDCLModel(nn.Module):
         if self.use_aspp:
             x = self.aspp(x)
         seg = self.seg_head(x)
-
-        embed = dict()
-        if 4 in self.output_layer_numbers:
-            # x = self.aspp_cl(features[-1])
-            embed['layer4'] = self.proj_head_layer4(x)
-            # embed['layer4'] = self.proj_head_layer4(out_decoder)
-        if 3 in self.output_layer_numbers:
-            embed['layer3'] = self.proj_head_layer3(features[-2])
-        if 2 in self.output_layer_numbers:
-            embed['layer2'] = self.proj_head_layer2(features[-3])
-        if 1 in self.output_layer_numbers:
-            embed['layer1'] = self.proj_head_layer1(features[-4])
-
+        embed = self.proj_head(x)
         return {'seg': seg, 'embed': embed}
