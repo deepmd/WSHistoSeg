@@ -3,11 +3,12 @@ import datetime
 import logging
 from easydict import EasyDict
 from torchcam import methods
-import numpy as np
-from PIL import Image
+from tqdm import tqdm
+# import numpy as np
+# from PIL import Image
 
 import torch
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 
 class AverageMeter(object):
@@ -123,3 +124,12 @@ def is_required_grad(wsol_method):
         return False
     elif wsol_method.lower() in ['layercam', 'gradcam', 'gradcampp', 'smoothgradcampp', 'xgradcam']:
         return True
+
+
+# def save_pseudo_labels(model, data_loaders, save_path, run):
+#     model = model.eval()
+#
+#     with torch.no_grad():
+#         for phase in ['train', 'val']:
+#             for idx, data_dict in enumerate(tqdm(data_loaders[phase])):
+#                 image = data_dict['image'].to(model.device)

@@ -1,3 +1,4 @@
+import glob
 import os
 import time
 import argparse
@@ -43,7 +44,7 @@ def parse_options():
     # optimization
     parser.add_argument('--optimizer', type=str, default='SGD', choices=['SGD', 'Adam'], help='optimizer')
     parser.add_argument('--lr_policy', type=str, default='lambda_poly', help='scheduler')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--learning_rate', type=float, default=0.002, help='learning rate')
     parser.add_argument('--lr_heads_ratio', type=int, default=10, help="learning rate ratio for adjusting heads' lr")
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -58,6 +59,7 @@ def parse_options():
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
+    parser.add_argument('--pseudo_labeling_step', type=int, default=15, help='')
     parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
@@ -140,13 +142,13 @@ def set_loader(opt):
 def set_model(opt):
     model = create_model(opt).to(opt.device)
     criterion = ContrastCELoss(opt.ce_weights, opt.ignore_index, opt.loss_weight,
-                               opt.temperature, opt.base_temperature, opt.num_samples)
+                               opt.temperature, opt.base_temperature, opt.num_samples, d_fg=0.996, d_bg=0.999)
     optimizer, scheduler = get_optim_scheduler(model, opt)
 
     return model, criterion, optimizer, scheduler
 
 
-def validate(model, val_loader, criterion, opt):
+def validate(model, val_loader, criterion, opt, pseudo_labels_path=None):
     model.eval()
     criterion.eval()
 
@@ -165,6 +167,9 @@ def validate(model, val_loader, criterion, opt):
                 logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:],
                                            mode='bicubic', align_corners=True)
             logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
+            if pseudo_labels_path is not None:
+                np.save(pseudo_labels_path, logits_seg)
+
             mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
             evaluator.accumulate(logits_seg, mask)
 
@@ -183,6 +188,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
     losses = AverageMeter()
     ce_losses = AverageMeter()
     contrast_losses = AverageMeter()
+    expand_losses = AverageMeter()
 
     end = time.time()
     total_corrects = [0, 0]
@@ -222,6 +228,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
             losses.update(loss.item(), bsz)
             ce_losses.update(partial_losses['ce'], bsz)
             contrast_losses.update(partial_losses['contrast'], bsz)
+            expand_losses.update(partial_losses['expand'], bsz)
 
         # SGD
         optimizer.zero_grad()
@@ -252,6 +259,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
                             f"Total Loss: {losses.val:.3f} ({losses.avg:.3f}) " +
                             f"CE Loss: {ce_losses.val:.3f} ({ce_losses.avg:.3f}) " +
                             f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t" +
+                            f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t" +
                             "Learning rate: {}".format([param_group['lr'] for param_group in optimizer.param_groups]))
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter % opt.max_iters == 0:
@@ -323,6 +331,7 @@ def main():
     opt.current_epoch = 0
     opt.current_iter = 0
     opt.best_val_pxap = {'valcl': -1, 'test': -1}
+    run = 0
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
@@ -339,6 +348,15 @@ def main():
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/CoFG', CoFG, opt.current_epoch)
         opt.tb_logger.add_scalar('train/CoBG', CoBG, opt.current_epoch)
+
+        # if opt.current_epoch % opt.pseudo_labeling_step == 0:
+        #     model_ = create_model(opt).to(opt.device)
+        #     checkpoint_path = glob.glob(os.path.join(opt.save_folder,
+        #     f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
+        #     state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+        #     model_.load_state_dict(state_dict['model'])
+        #     save_pseudo_labels(model_, data_loaders, opt.data_root, run)
+        #     run += 1
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "

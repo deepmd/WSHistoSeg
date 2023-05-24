@@ -40,7 +40,7 @@ class FSCELoss(nn.Module):
 
 class ContrastCELoss(nn.Module):
     def __init__(self, class_weights, ignore_index, loss_weight,
-                 temperature, base_temperature, num_samples):
+                 temperature, base_temperature, num_samples, d_fg, d_bg):
         super(ContrastCELoss, self).__init__()
 
         self.loss_weight = loss_weight
@@ -48,6 +48,7 @@ class ContrastCELoss(nn.Module):
         self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
         self.contrast_criterion = PixelContrastLoss(temperature=temperature, base_temperature=base_temperature,
                                                     ignore_index=self.ignore_index, num_samples=num_samples)
+        self.expand_loss = ExpandLoss(d_fg, d_bg)
 
     def forward(self, preds, cams, masks, labels, use_pseudo_mask=False):
         assert "seg" in preds
@@ -62,8 +63,10 @@ class ContrastCELoss(nn.Module):
         loss = self.seg_criterion(seg_preds, target_mask)
 
         loss_contrast, num_corrects = self.contrast_criterion(embedding, cams, masks, labels)
+        loss_expand = self.expand_loss(seg_preds)
 
-        return loss + self.loss_weight * loss_contrast, {'ce': loss, 'contrast': loss_contrast}, num_corrects
+        return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
+               {'ce': loss, 'contrast': loss_contrast, 'expand': loss_expand}, num_corrects
 
 
 class PixelContrastLoss(nn.Module):
@@ -141,3 +144,36 @@ class PixelContrastLoss(nn.Module):
         num_fg_corrects = int((masks[selected_pixels == 1] == 1).sum())
         num_bg_corrects = int((masks[selected_pixels == 0] == 0).sum())
         return contrast_loss, [num_fg_corrects, num_bg_corrects]
+
+
+class ExpandLoss(nn.Module):
+    def __init__(self, d_fg, d_bg):
+        super(ExpandLoss, self).__init__()
+        self.d_fg = d_fg
+        self.d_bg = d_bg
+
+    def forward(self, predicts):
+        seg_preds = torch.softmax(predicts, dim=1)
+        fg_seg_preds = seg_preds[:, 1, :, :].view(seg_preds.size(0), -1)
+        fg_sorted_preds, _ = torch.sort(fg_seg_preds, dim=1, descending=True)
+        fg_weights = torch.tensor([self.d_fg ** i for i in range(fg_sorted_preds.size(1))]).to(seg_preds.device)
+        weighted_fg_preds = fg_sorted_preds * fg_weights
+
+        bg_seg_preds = seg_preds[:, 0, :, :].view(seg_preds.size(0), -1)
+        bg_sorted_preds, _ = torch.sort(bg_seg_preds, dim=1, descending=True)
+        bg_weights = torch.tensor([self.d_bg ** i for i in range(fg_sorted_preds.size(1))]).to(seg_preds.device)
+        weighted_bg_preds = bg_sorted_preds * bg_weights
+
+        g_fg = 1/torch.sum(fg_weights) * torch.sum(weighted_fg_preds, dim=1)
+        g_bg = 1/torch.sum(bg_weights) * torch.sum(weighted_bg_preds, dim=1)
+        loss_fg = -torch.mean(torch.log(g_fg))
+        loss_bg = -torch.mean(torch.log(g_bg))
+        loss = loss_fg + loss_bg
+        return loss
+
+
+
+
+
+
+
