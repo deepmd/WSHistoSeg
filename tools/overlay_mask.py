@@ -25,14 +25,14 @@ def save_image(image: Image.Image, image_path: str):
 
 if __name__ == "__main__":
     image_dir = "/home/reza/Documents/GLAS/Warwick_QU_Dataset_(Released_2016_07_08)"
-    cam_dir = "/home/reza/Documents/GLAS/Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4"
-    output_dir = "./overlay_images4"
+    cam_dir = "/home/reza/Documents/WSHistoSeg/tools/segmask_85.32/segmask/cams"
+    output_dir = "./overlay_images_85.32"
     makedirs(output_dir, exist_ok=True)
 
     file_paths = glob(path.join(image_dir, 'test*.bmp'))
     image_paths = [file_name for file_name in file_paths if 'anno' not in file_name]
     mask_paths = [image_name.replace('.', '_anno.') for image_name in image_paths]
-    cam_paths = [path.join(cam_dir, path.basename(image_name).replace('.bmp', '_layer4_cam.npy'))
+    cam_paths = [path.join(cam_dir, path.basename(image_name).replace('.bmp', '.bmp.npy'))
                  for image_name in image_paths]
     # cam_paths = [path.join(cam_dir, path.basename(image_name).replace('.bmp', '_negev.npy')) for image_name in image_paths]
 
@@ -40,21 +40,20 @@ if __name__ == "__main__":
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.uint8)
 
-        # mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        # mask = (mask > 0.5).astype(np.float32)
-        #
-        # overlay_image = overlay_mask(to_pil_image(image), to_pil_image(mask))
-        # image_name = path.basename(image_path).replace('.bmp', '.png')
-        # output_path = path.join(output_dir, image_name)
-        # save_image(overlay_image[0], output_path)
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = (mask > 0.5).astype(np.float32)
+
+        overlay_image = overlay_mask(to_pil_image(image), to_pil_image(mask))
+        image_name = path.basename(image_path).replace('.bmp', '.png')
+        output_path = path.join(output_dir, image_name)
+        save_image(overlay_image[0], output_path)
 
         cam = np.load(cam_path).astype(np.float32)
         cam = (cam - cam.min()) / (cam.max() - cam.min())
         overlay_image = overlay_mask(to_pil_image(image), to_pil_image(cam))
-        cam_name = path.basename(image_path).replace('.bmp', '_gradcam.png')
+        cam_name = path.basename(image_path).replace('.bmp', '_ours_85.32.png')
         output_path = path.join(output_dir, cam_name)
         save_image(overlay_image[0], output_path)
-
 
         # image = Image.open(image_path)
         # mask = Image.open(mask_path).convert("L")

@@ -40,28 +40,28 @@ class FSCELoss(nn.Module):
 
 class ContrastCELoss(nn.Module):
     def __init__(self, class_weights, ignore_index, loss_weight,
-                 temperature, base_temperature, num_samples, d_fg, d_bg):
+                 temperature, base_temperature, num_samples, d_fg, d_bg, gamma):
         super(ContrastCELoss, self).__init__()
 
         self.loss_weight = loss_weight
         self.ignore_index = ignore_index
-        self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
+        # self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
+        self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
         self.contrast_criterion = PixelContrastLoss(temperature=temperature, base_temperature=base_temperature,
                                                     ignore_index=self.ignore_index, num_samples=num_samples)
         self.expand_loss = ExpandLoss(d_fg, d_bg)
 
-    def forward(self, preds, cams, masks, labels, use_pseudo_mask=False):
+    def forward(self, preds, cams, masks, labels, sample_ratio=0.2, use_pseudo_mask=False):
         assert "seg" in preds
         assert "embed" in preds
 
         seg_preds = preds['seg']
         embedding = preds['embed']
 
-        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index) if use_pseudo_mask else masks
+        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio) if use_pseudo_mask else masks
         target_mask = target_mask.to(seg_preds.device)
 
         loss = self.seg_criterion(seg_preds, target_mask)
-
         loss_contrast, num_corrects = self.contrast_criterion(embedding, cams, masks, labels)
         loss_expand = self.expand_loss(seg_preds)
 
@@ -127,14 +127,18 @@ class PixelContrastLoss(nn.Module):
 
         embeddings = embeddings.permute(0, 2, 3, 1)
 
-        selected_pixels = generate_foreground_background_mask(cams, self.num_samples)
+        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index)
 
         fg_feats = embeddings[selected_pixels == 1]
         fg_labels = torch.ones(fg_feats.shape[0])
 
         bg_feats = embeddings[selected_pixels == 0]
-        # bg_feats = sample_bg(bg_feats, fg_feats)
+        # bg_feats, indices = sample_bg(bg_feats, fg_feats)
         bg_labels = torch.zeros(bg_feats.shape[0])
+        # selected_pixels = selected_pixels.view(embeddings.size(0), -1)
+        # selected_pixels[selected_pixels == 0] = 255
+        # selected_pixels.scatter_(1, indices.to(selected_pixels.device), 0)
+        # selected_pixels = selected_pixels.view(embeddings.size(0), h, w)
 
         all_feats = torch.cat([fg_feats, bg_feats], dim=0).unsqueeze(1)
         all_labels = torch.cat([fg_labels, bg_labels], dim=0)
@@ -170,6 +174,60 @@ class ExpandLoss(nn.Module):
         loss_bg = -torch.mean(torch.log(g_bg))
         loss = loss_fg + loss_bg
         return loss
+
+
+class _Loss(torch.nn.Module):
+    def __init__(self, reduction='mean'):
+        super(_Loss, self).__init__()
+        self.reduction = reduction
+
+    def forward(self, *input):
+        raise NotImplementedError
+
+
+class _WeightedLoss(_Loss):
+    def __init__(self, weight=None, reduction='mean'):
+        super(_WeightedLoss, self).__init__(reduction)
+        self.register_buffer('weight', weight)
+
+    def forward(self, *input):
+        raise NotImplementedError
+
+
+class DynamicLoss(_WeightedLoss):
+    __constants__ = ['weight', 'ignore_index', 'reduction']
+
+    def __init__(self, gamma=0, weight=None, ignore_index=-255, reduction='mean'):
+        super().__init__(weight, reduction)
+        self.gamma = gamma
+        self.ignore_index = ignore_index
+        self.criterion_ce = torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduction='none')
+
+    @staticmethod
+    def _scale_target(targets_, scaled_size):
+        targets = targets_.clone().float()
+        targets = F.interpolate(targets, size=scaled_size, mode='nearest')
+        return targets.squeeze(1).long()
+
+    def forward(self, inputs, targets):
+        targets = self._scale_target(targets, (inputs.size(2), inputs.size(3)))
+        total_loss = self.criterion_ce(inputs, targets)  # Pixel-level weight is always 1
+
+        if self.gamma == 0:  # No dynamic loss
+            total_loss = total_loss.sum() / (targets != self.ignore_index).sum()
+        else:  # Dynamic loss
+            probabilities = inputs.softmax(dim=1).clone().detach()
+            fg_indices = targets.unsqueeze(1).clone().detach()
+            bg_indices = 1 - fg_indices
+            fg_indices[fg_indices == self.ignore_index] = 0
+            bg_indices[bg_indices < 0] = 0
+            fg_probabilities = probabilities.gather(dim=1, index=fg_indices).squeeze(1)
+            bg_probabilities = probabilities.gather(dim=1, index=bg_indices).squeeze(1)
+            fg_probabilities = fg_probabilities ** self.gamma
+            bg_probabilities = bg_probabilities ** self.gamma
+            probabilities = fg_probabilities + bg_probabilities
+            total_loss = (total_loss * probabilities).sum() / (targets != self.ignore_index).sum()
+        return total_loss
 
 
 

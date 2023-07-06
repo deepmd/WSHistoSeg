@@ -164,7 +164,7 @@ def main(cfg):
 
     data_loader = build_loaders(cfg)
     model = create_model(cfg).to(device)
-    layer = "layer1"
+    layer = "layer4"
     # trg_layer = 'encoder.layer4.2.relu3'
     fc_layer = 'classification_head.fc'
     cam_extractor = get_cam_extractor(cfg.method, model, layers[layer]['trg_layer'], fc_layer)
@@ -217,11 +217,11 @@ if __name__ == '__main__':
     parser.add_argument('--metadata_root', type=str,
                         default="/home/reza/Documents/WSHistoSeg/datasets/folds/GLAS/fold-0", help='')
     parser.add_argument('--method', type=str, default='gradcam', help='')
-    parser.add_argument('--split', type=str, default='test', help='')
-    parser.add_argument('--run_dir', type=str, default="Grad_CAMs", help='')
+    parser.add_argument('--split', type=str, default='valcl', help='')
+    parser.add_argument('--run_dir', type=str, default="GradCAMs", help='')
     parser.add_argument('--encoder_name', type=str, default="resnet50", help='')
     parser.add_argument('--encoder_weights_dir', type=str, default="../weights", help='')
-    parser.add_argument('--resize_size', type=int, default=224, help='')
+    parser.add_argument('--resize_size', type=int, default=256, help='')
     parser.add_argument('--num_classes', type=int, default=2, help='')
     parser.add_argument('--num_workers', type=int, default=0, help='')
     parser.add_argument('--seed', type=int, default=0, help='')

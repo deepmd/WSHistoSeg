@@ -67,7 +67,7 @@ def get_optim_scheduler(model, opt):
     params_group = _get_model_params_for_opt(opt, model)
     optimizer = get_optimizer(params_group, opt)
 
-    lambda_poly = lambda iters: pow((1.0 - iters / opt.max_iters), opt.power)
+    lambda_poly = lambda iters: pow((1.0 - iters / (opt.max_iters / opt.num_rounds)), opt.power)
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_poly)
 
     return optimizer, scheduler

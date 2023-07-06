@@ -11,17 +11,14 @@ from torch import Tensor
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-# import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 
 from utils import set_up_logger, log_parameters, save_checkpoint
 from datasets import get_transforms
-# from networks.hrnet import HRNet_W48_CONTRAST
 from optim_scheduler import get_optim_scheduler
 from losses import ContrastCELoss
-from utils import AverageMeter
+from utils import AverageMeter, save_pseudo_labels
 # from metrics import ConfMatrix
-# from networks.sync_batchnorm import convert_model, DataParallelWithCallback
 
 from datasets.wsol_loaders import WsolDataset
 from networks import create_model
@@ -52,6 +49,7 @@ def parse_options():
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument("--power", type=float, default=0.9, help="Decay parameter to compute the learning rate.")
     parser.add_argument("--loss_weight", type=float, default=0.1, help="the weight is used for balancing losses.")
+    parser.add_argument('--gamma', type=float, default=2, help='Gamma value for reverse focal loss (default: 2)')
 
     # contrastive loss
     parser.add_argument("--temperature", type=float, default=0.1, help="temperature in contrastive loss.")
@@ -61,8 +59,9 @@ def parse_options():
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
-    parser.add_argument('--pseudo_labeling_step', type=int, default=15, help='')
     parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
+    parser.add_argument('--num_rounds', type=int, default=5, help='max epochs for training.')
+    parser.add_argument('--pseudo_labeling_step', type=int, default=200, help='')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
     parser.add_argument('--crop_size', type=int, default=224, help='crop size')
@@ -78,6 +77,7 @@ def parse_options():
 
     opt.ce_weights = [1.0, 1.0]
     opt.ignore_index = 255
+    # opt.pseudo_labeling_step = int(opt.max_iters / opt.num_rounds) + 1
 
     opt.model_name = f"glas_model_{opt.encoder_name}_{opt.optimizer}" + \
                      f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE_CL_trial_{opt.trial}"
@@ -106,10 +106,10 @@ def set_loader(opt):
     datasets = {
         split: WsolDataset(
             data_root=opt.data_root,
-            metadata_root=os.path.join(opt.metadata_root, split),
+            metadata_root=os.path.join(opt.metadata_root, split if split != 'train_ps' else 'train'),
             transforms=data_transforms[split]
         )
-        for split in ['train', 'valcl', 'test']
+        for split in ['train', 'valcl', 'test', 'train_ps']
     }
 
     def seed_worker(worker_id):
@@ -129,7 +129,7 @@ def set_loader(opt):
             worker_init_fn=seed_worker,
             generator=g
         )
-        for split in ['train', 'valcl', 'test']
+        for split in ['train', 'valcl', 'test', 'train_ps']
     }
     # pin_memory = True,
     # drop_last = True,
@@ -144,7 +144,8 @@ def set_loader(opt):
 def set_model(opt):
     model = create_model(opt).to(opt.device)
     criterion = ContrastCELoss(opt.ce_weights, opt.ignore_index, opt.loss_weight,
-                               opt.temperature, opt.base_temperature, opt.num_samples, d_fg=0.996, d_bg=0.999)
+                               opt.temperature, opt.base_temperature, opt.num_samples,
+                               d_fg=0.996, d_bg=0.999, gamma=opt.gamma)
     optimizer, scheduler = get_optim_scheduler(model, opt)
 
     return model, criterion, optimizer, scheduler
@@ -160,7 +161,7 @@ def _normalize(cams: Tensor, spatial_dims: Optional[int] = None) -> Tensor:
     return cams
 
 
-def validate(model, val_loader, criterion, opt, pseudo_labels_path=None):
+def evaluate(model, val_loader, criterion, opt, pseudo_labels_path=None):
     model.eval()
     criterion.eval()
 
@@ -177,8 +178,8 @@ def validate(model, val_loader, criterion, opt, pseudo_labels_path=None):
             if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
                 logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:],
                                            mode='bilinear', align_corners=True)
-            logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
-            # logits_seg = _normalize(torch.softmax(logits_seg, dim=1)[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
+            # logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
+            logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
             if pseudo_labels_path is not None:
                 np.save(pseudo_labels_path, logits_seg)
             mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
@@ -190,7 +191,7 @@ def validate(model, val_loader, criterion, opt, pseudo_labels_path=None):
     return results
 
 
-def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
+def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
     model.train()
     criterion.train()
 
@@ -214,24 +215,8 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
 
         # compute loss
         outputs = model(images)
-
-        # if opt.best_val_pxap['test'] > 76:
-        #     masks = torch.softmax(outputs['seg'], dim=1)[:, 1, :, :]
-        #     masks = torch.nan_to_num(masks, nan=0.0, posinf=1., neginf=0.0)
-        #     masks = F.interpolate(masks.unsqueeze(1), gt_masks.size()[2:], mode='bilinear', align_corners=True)
-        #     gt_masks = torch.zeros_like(gt_masks).to(gt_masks.device)
-        #     gt_masks[masks > 0.5] = 1
-        #
-        #     cams = {'layer4': masks}
-
-        # if opt.best_val_pxap['test'] > 80:
-        #     image_size = images.size()[2:]
-        #     cams = torch.sigmoid(outputs['seg'][:, 1]).unsqueeze(1)  # .astype(float)
-        #     # cams = torch.nan_to_num(cams, nan=0.0, posinf=1., neginf=0.0)
-        #     cams = F.interpolate(cams, image_size, mode='bicubic', align_corners=True)
-        #     cams = {'layer4': cams}
-
-        loss, partial_losses, num_corrects = criterion(outputs, cams, masks, labels, opt.use_pseudo_mask)
+        loss, partial_losses, num_corrects = criterion(outputs, cams, masks, labels,
+                                                       [0.2, 0.3, 0.3, 0.4, 0.5][round-1], opt.use_pseudo_mask)
         total_corrects[0] += num_corrects[0]
         total_corrects[1] += num_corrects[1]
 
@@ -275,7 +260,7 @@ def train_validate(model, criterion, data_loaders, optimizer, scheduler, opt):
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter % opt.max_iters == 0:
             for split in ['valcl', 'test']:
-                metrics = validate(model, data_loaders[split], criterion, opt)
+                metrics = evaluate(model, data_loaders[split], criterion, opt)
                 opt.logger.info(f"[{split.upper()}] [Epoch {opt.current_epoch}] "
                                 f"[Iteration {opt.current_iter}]\t")
                 for metric, value in metrics.items():
@@ -339,15 +324,15 @@ def main():
     criterion = criterion.to(opt.device)
 
     # training routine
-    opt.current_epoch = 0
-    opt.current_iter = 0
+    opt.current_epoch = 1
+    opt.current_iter = 1
     opt.best_val_pxap = {'valcl': -1, 'test': -1}
-    run = 0
+    round = 1
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
-        loss, ce_loss, contrast_loss, total_corrects = train_validate(model, criterion, data_loaders,
-                                                                      optimizer, scheduler, opt)
+        loss, ce_loss, contrast_loss, total_corrects = train(model, criterion, data_loaders,
+                                                             optimizer, scheduler, opt, round)
         time2 = time.time()
         CoFG = total_corrects[0] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
         CoBG = total_corrects[1] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
@@ -360,14 +345,23 @@ def main():
         opt.tb_logger.add_scalar('train/CoFG', CoFG, opt.current_epoch)
         opt.tb_logger.add_scalar('train/CoBG', CoBG, opt.current_epoch)
 
-        # if opt.current_epoch % opt.pseudo_labeling_step == 0:
-        #     model_ = create_model(opt).to(opt.device)
-        #     checkpoint_path = glob.glob(os.path.join(opt.save_folder,
-        #     f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
-        #     state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-        #     model_.load_state_dict(state_dict['model'])
-        #     save_pseudo_labels(model_, data_loaders, opt.data_root, run)
-        #     run += 1
+        if opt.current_epoch % opt.pseudo_labeling_step == 0:
+            if round != 5:
+                model_ = create_model(opt).to(opt.device)
+                # Loading best model in previous iterations
+                checkpoint_path = glob.glob(os.path.join(opt.save_folder,
+                f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
+                state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+                model_.load_state_dict(state_dict['model'])
+                # Generating CAMs
+                save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
+                save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
+                # round += 1
+                # Restarting optimizer and scheduler to initial state
+                # opt.current_epoch = 1
+                # opt.current_iter = 1
+                # model, ـ, optimizer, scheduler = set_model(opt)
+            break
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "

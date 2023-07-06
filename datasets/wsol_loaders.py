@@ -24,11 +24,13 @@ class WsolDataset(Dataset):
         return len(self.image_ids)
 
     def get_cam(self, image_id, image_size):
+        cam = None
         cam_path = os.path.join(self.data_root, self.cam_paths[image_id][3])
-        cam = np.load(cam_path)
-        cam = torch.from_numpy(cam).float()
-        cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0), image_size, mode='bicubic', align_corners=True)
-        cam = cam.squeeze(0)  # 1, H, W
+        if os.path.isfile(cam_path):
+            cam = np.load(cam_path)
+            cam = torch.from_numpy(cam).float()
+            cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0), image_size, mode='bicubic', align_corners=True)
+            cam = cam.squeeze(0)  # 1, H, W
         return cam
 
     def get_mask(self, image_id):
@@ -59,18 +61,27 @@ class WsolDataset(Dataset):
         cam = self.get_cam(image_id, image.size)
 
         if self.transforms:
-            image, raw_image, cam, mask = self.transforms(image, raw_image, cam, mask)
+                image, raw_image, cam, mask = self.transforms(image, raw_image, cam, mask)
 
         # raw_image = np.array(raw_image, dtype=np.float32)  # h, w, 3
         # raw_image = torch.from_numpy(raw_image).permute(2, 0, 1)  # 3, h, w
 
+        if cam is not None:
+            return {
+                'image': image,
+                'label': image_label,
+                'image_id': image_id,
+                'mask': mask,
+                'cam': cam,
+            }
         return {
             'image': image,
             'label': image_label,
             'image_id': image_id,
             'mask': mask,
-            'cam': cam,
         }
+
+
 
 
 
