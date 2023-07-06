@@ -2,23 +2,155 @@ import argparse
 import os
 import random
 import numpy as np
-from torchcam.methods import CAM, LayerCAM
 from torchcam.utils import overlay_mask
-import matplotlib.pyplot as plt
 from PIL import Image
 
 
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.transforms.functional import to_pil_image, normalize
+from torchvision.transforms.functional import to_pil_image
 import torch.nn.functional as F
 
-from networks import create_model
+# from networks import create_model
 from datasets.wsol_loaders import WsolDataset
 from evaluation import MaskEvaluation
-from datasets.transforms import Resize, Compose, RandomCrop, RandomHorizontalFlip, RandomVerticalFlip
-from utils import configure_metadata, get_cam_extractor, is_required_grad
+from datasets.transforms import Resize, Compose
+from utils import get_cam_extractor, is_required_grad
+from networks.STDCLModel import STDCLModel
+import networks.initialization as init
+from networks.modules import BNReLU, ProjectionHead
+from networks.resnet import resnet_encoders
+from networks.aspp import ASPP
+
+
+encoders = {}
+encoders.update(resnet_encoders)
+
+
+class WGAP(nn.Module):
+    """ https://arxiv.org/pdf/1512.04150.pdf """
+    def __init__(self, in_channels, classes):
+        super(WGAP, self).__init__()
+        self.name = 'WGAP'
+
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(in_channels, classes)
+
+    @property
+    def builtin_cam(self):
+        return False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pre_logit = self.avgpool(x)
+        pre_logit = pre_logit.reshape(pre_logit.size(0), -1)
+        logits = self.fc(pre_logit)
+
+        return logits
+
+
+# class STDCLModel(nn.Module):
+#     def __init__(self, encoder_name, num_classes, method):
+#         super().__init__()
+#
+#         self.method = method
+#         encoder = encoders[encoder_name]['encoder']
+#         encoder_params = encoders[encoder_name]['params']
+#         self.encoder = encoder(**encoder_params)
+#
+#         in_channels = encoder_params['out_channels'][-1]
+#         if 'cam' in self.method:
+#             self.classification_head = WGAP(in_channels, num_classes)
+#             self.initialize()
+#         else:
+#             self.seg_head = nn.Sequential(
+#                 nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+#                 BNReLU(in_channels, bn_type='torchbn'),
+#                 nn.Dropout2d(0.10),
+#                 nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+#             )
+#
+#     def initialize(self):
+#         if self.classification_head is not None:
+#             init.initialize_head(self.classification_head)
+#
+#     def forward(self, x):
+#         features = self.encoder(x)
+#         if 'cam' in self.method:
+#             out = self.classification_head(features[-1])
+#         else:
+#             out = self.seg_head(features[-1])
+#         return out
+
+class STDCLModel(nn.Module):
+    def __init__(self, encoder_name, num_classes, depth=5, proj_dim=128, use_aspp=False):
+        super().__init__()
+
+        encoder = encoders[encoder_name]['encoder']
+        encoder_params = encoders[encoder_name]['params']
+        encoder_params.update(depth=depth)
+        self.encoder = encoder(**encoder_params)
+
+        # self.classification_head = WGAP(encoder_params['out_channels'][-1], num_classes)
+
+        self.use_aspp = use_aspp
+        in_channels = encoder_params['out_channels'][-1]
+        if self.use_aspp:
+            self.aspp = ASPP(encoder_name, output_stride=8, BatchNorm=nn.BatchNorm2d)
+            self.seg_head = nn.Sequential(
+                nn.Conv2d(1280, 256, kernel_size=1, stride=1, padding=0, bias=False),
+                BNReLU(256, bn_type='torchbn'),
+                nn.Dropout2d(0.10),
+                nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+            )
+            self.proj_head = ProjectionHead(dim_in=1280, proj_dim=proj_dim, proj='linear')
+        else:
+            self.seg_head = nn.Sequential(
+                nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+                BNReLU(in_channels, bn_type='torchbn'),
+                nn.Dropout2d(0.10),
+                nn.Conv2d(in_channels, num_classes, kernel_size=1, stride=1, padding=0, bias=False)
+            )
+            # self.seg_head = SegHead(in_channels, num_classes)
+            self.proj_head = ProjectionHead(dim_in=in_channels, proj_dim=proj_dim, proj='linear')
+
+        # self.initialize()
+
+    def initialize(self):
+        if self.classification_head is not None:
+            init.initialize_head(self.classification_head)
+
+    def forward(self, x):
+        features = self.encoder(x)
+        # cl_logits = self.classification_head(features[-1])
+        x = features[-1]
+        if self.use_aspp:
+            x = self.aspp(x)
+        seg = self.seg_head(x)
+        embed = self.proj_head(x)
+        return {'seg': seg, 'embed': embed}
+
+
+def create_model(cfg):
+    model = STDCLModel(encoder_name=cfg.encoder_name, num_classes=cfg.num_classes, proj_dim=128, use_aspp=True)
+
+    if cfg.encoder_weights_dir is not None:
+        if 'cam' in cfg.method:
+            encoder_weights = os.path.join(cfg.encoder_weights_dir, 'encoder.pt')
+            classifier_weights = os.path.join(cfg.encoder_weights_dir, 'classification_head.pt')
+
+            encoder_state_dict = torch.load(encoder_weights, map_location='cpu')
+            classifier_state_dict = torch.load(classifier_weights, map_location='cpu')
+
+            model.encoder.load_state_dict(encoder_state_dict, strict=True)
+            model.classification_head.load_state_dict(classifier_state_dict, strict=True)
+        else:
+            weights = os.path.join(cfg.encoder_weights_dir, 'ckpt_test_iter_60_85.32164703922639.pth')
+            state_dict = torch.load(weights)
+            model.load_state_dict(state_dict['model'], strict=False)
+
+    return model
 
 
 def build_transforms(cfg):
@@ -126,17 +258,17 @@ def main(cfg):
                                         image.shape[2:],
                                         mode='bilinear',
                                         align_corners=False).squeeze(0).squeeze(0)
-                    cam = cam.detach().cpu().numpy().astype(np.float)
+                    cam = cam.detach().cpu().numpy().astype(float)
             else:
-                assert out.size()[1] == cfg.num_classes
-                cam = torch.sigmoid(out[:, 1])
+                assert out['seg'].size()[1] == cfg.num_classes
+                cam = torch.sigmoid(out['seg'][:, 1])
                 cam = cam.squeeze(0)
                 np.save(out_path, cam.cpu().numpy())
                 cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0),
                                     image.shape[2:],
                                     mode='bilinear',
                                     align_corners=False).squeeze(0).squeeze(0)
-                cam = cam.detach().cpu().numpy().astype(np.float)
+                cam = cam.detach().cpu().numpy().astype(float)
 
             mask = F.interpolate(gt_mask.float(), image.shape[2:], mode='nearest').squeeze(0).squeeze(0)
             mask = mask.cpu().numpy().astype(np.uint8)
@@ -176,12 +308,13 @@ def main(cfg):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--data_root', type=str, default="/home/reza/Documents/GLAS", help='')
-    parser.add_argument('--metadata_root', type=str, default="/home/reza/Documents/Earasing/folds/GLAS/fold-0", help='')
+    parser.add_argument('--metadata_root', type=str,
+                        default="/home/reza/Documents/WSHistoSeg/datasets/folds/GLAS/fold-0", help='')
     parser.add_argument('--method', type=str, default='segmask', help='')
-    parser.add_argument('--split', type=str, default='train', help='')
-    parser.add_argument('--run_dir', type=str, default="SegMask", help='')
+    parser.add_argument('--split', type=str, default='test', help='')
+    parser.add_argument('--run_dir', type=str, default="segmask_85.32", help='')
     parser.add_argument('--encoder_name', type=str, default="resnet50", help='')
-    parser.add_argument('--encoder_weights_dir', type=str, default="weights", help='')
+    parser.add_argument('--encoder_weights_dir', type=str, default="../weights", help='')
     parser.add_argument('--resize_size', type=int, default=256, help='')
     parser.add_argument('--crop_size', type=int, default=224, help='')
     parser.add_argument('--num_classes', type=int, default=2, help='')

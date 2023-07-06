@@ -4,11 +4,13 @@ import logging
 from easydict import EasyDict
 from torchcam import methods
 from tqdm import tqdm
-# import numpy as np
-# from PIL import Image
+import numpy as np
+
 
 import torch
-# import torch.nn.functional as F
+import torch.nn.functional as F
+
+from evaluation import MaskEvaluation
 
 
 class AverageMeter(object):
@@ -126,10 +128,33 @@ def is_required_grad(wsol_method):
         return True
 
 
-# def save_pseudo_labels(model, data_loaders, save_path, run):
-#     model = model.eval()
-#
-#     with torch.no_grad():
-#         for phase in ['train', 'val']:
-#             for idx, data_dict in enumerate(tqdm(data_loaders[phase])):
-#                 image = data_dict['image'].to(model.device)
+def save_pseudo_labels(model, data_loaders, save_path, round, logger, device):
+    logger.info(f'Round {round} finished and round {round+1} is starting:')
+    os.rename(save_path, save_path + f'_round{round}')
+    os.makedirs(save_path, exist_ok=False)
+
+    model = model.eval()
+    with torch.no_grad():
+        for split in ['train_ps', 'valcl', 'test']:
+            evaluator = MaskEvaluation(cam_curve_interval=0.001)
+            for idx, data_dict in enumerate(tqdm(data_loaders[split])):
+                image = data_dict['image'].to(device)
+                gt_masks = data_dict['mask'].to(device)
+                image_name = data_dict['image_id'][0]
+
+                logits_seg = model(image)['seg']
+                # logits_seg = torch.sigmoid(logits_seg[:, 1])
+                logits_seg = torch.softmax(logits_seg, dim=1)[:, 1]
+                pseudo_filename = image_name.split('/')[-1].replace('.bmp', '_layer4_cam.npy')
+                np.save(os.path.join(save_path, pseudo_filename), logits_seg.squeeze(0).detach().cpu().numpy().astype(float))
+                if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
+                    logits_seg = F.interpolate(logits_seg.unsqueeze(0),
+                                               gt_masks.size()[2:],
+                                               mode='bilinear', align_corners=True)
+                logits_seg = logits_seg.squeeze(0).squeeze(0).detach().cpu().numpy().astype(float)
+
+                mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
+                evaluator.accumulate(logits_seg, mask)
+            pxap = evaluator.compute()
+            logger.info(f"Round {round} - PXAP on {split if split != 'train_ps' else 'train'} set: {pxap}")
+
