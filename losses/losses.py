@@ -45,8 +45,8 @@ class ContrastCELoss(nn.Module):
 
         self.loss_weight = loss_weight
         self.ignore_index = ignore_index
-        # self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
-        self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
+        self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
+        # self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
         self.contrast_criterion = PixelContrastLoss(temperature=temperature, base_temperature=base_temperature,
                                                     ignore_index=self.ignore_index, num_samples=num_samples)
         self.expand_loss = ExpandLoss(d_fg, d_bg)
