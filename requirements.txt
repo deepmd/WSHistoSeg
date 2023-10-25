@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu111
+numpy~=1.21.6
+opencv-python~=3.4.4.19
+matplotlib~=3.0.2
+pillow~=9.4.0
+torchcam~=0.3.2
+torchvision~=0.11.1+cu111
+torch~=1.10.0+cu111
+tqdm~=4.64.1
+pretrainedmodels~=0.7.4
+easydict~=1.10
+tensorboard~=2.11.2
+setuptools==59.5.0

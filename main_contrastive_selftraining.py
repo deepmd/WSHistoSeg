@@ -38,7 +38,7 @@ def parse_options():
     parser.add_argument('--use_pseudo_mask', dest="use_pseudo_mask", action='store_true',
                         help='using pseudo masks for training.')
     parser.add_argument("--use_aspp", dest="use_aspp", action="store_true",
-                        help="use aspp module at the esnd of encoder.")
+                        help="use aspp module at the end of encoder.")
 
     # optimization
     parser.add_argument('--optimizer', type=str, default='SGD', choices=['SGD', 'Adam'], help='optimizer')
@@ -60,7 +60,8 @@ def parse_options():
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
-    parser.add_argument('--num_rounds', type=int, default=5, help='max epochs for training.')
+    parser.add_argument('--num_rounds', type=int, default=5, help='max rounds for training.')
+    parser.add_argument('--round', type=int, help='current round number.')
     parser.add_argument('--pseudo_labeling_step', type=int, default=200, help='')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
@@ -84,7 +85,7 @@ def parse_options():
 
     save_path = os.path.join("./save", opt.model_name)
 
-    opt.tb_folder = os.path.join(save_path, "tensorboard")
+    opt.tb_folder = os.path.join(save_path, "tensorboard", f"round_{opt.round}")
     if not os.path.isdir(opt.tb_folder):
         os.makedirs(opt.tb_folder)
 
@@ -272,7 +273,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                 if metrics['PXAP'] > opt.best_val_pxap[split]:
                     opt.best_val_pxap[split] = metrics['PXAP']
                     # save model
-                    filename = f"ckpt_{split}_iter_{opt.current_iter}_{metrics['PXAP']}.pth"
+                    filename = f"ckpt_{split}_rnd_{round}_iter_{opt.current_iter}_{metrics['PXAP']}.pth"
                     save_file = os.path.join(opt.save_folder, filename)
                     if opt.current_iter % opt.max_iters == 0:
                         save_file = os.path.join(opt.save_folder, f"last_{metrics['PXAP']}.pth")
@@ -327,7 +328,7 @@ def main():
     opt.current_epoch = 1
     opt.current_iter = 1
     opt.best_val_pxap = {'valcl': -1, 'test': -1}
-    round = 1
+    round = opt.round
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
@@ -346,7 +347,7 @@ def main():
         opt.tb_logger.add_scalar('train/CoBG', CoBG, opt.current_epoch)
 
         if opt.current_epoch % opt.pseudo_labeling_step == 0:
-            if round != 5:
+            if round != opt.num_rounds:
                 model_ = create_model(opt).to(opt.device)
                 # Loading best model in previous iterations
                 checkpoint_path = glob.glob(os.path.join(opt.save_folder,
