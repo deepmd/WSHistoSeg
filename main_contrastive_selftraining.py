@@ -47,14 +47,15 @@ def parse_options():
     parser.add_argument('--lr_heads_ratio', type=int, default=10, help="learning rate ratio for adjusting heads' lr")
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
-    parser.add_argument("--power", type=float, default=0.9, help="Decay parameter to compute the learning rate.")
-    parser.add_argument("--loss_weight", type=float, default=0.1, help="the weight is used for balancing losses.")
+    parser.add_argument('--power', type=float, default=0.9, help="Decay parameter to compute the learning rate.")
+    parser.add_argument('--loss_weight', type=float, default=0.1, help="the weight is used for balancing losses.")
     parser.add_argument('--gamma', type=float, default=2, help='Gamma value for reverse focal loss (default: 2)')
 
     # contrastive loss
-    parser.add_argument("--temperature", type=float, default=0.1, help="temperature in contrastive loss.")
-    parser.add_argument("--base_temperature", type=float, default=0.07, help="base temperature in contrastive loss.")
-    parser.add_argument('--num_samples', type=int, default=10, help='max samples')
+    parser.add_argument('--temperature', type=float, default=0.1, help='temperature in contrastive loss.')
+    parser.add_argument('--base_temperature', type=float, default=0.07, help='base temperature in contrastive loss.')
+    parser.add_argument('--num_samples', type=int, default=10, help='max samples for contrastive loss')
+    parser.add_argument('--sample_ratio', type=float, default=0.2, help='samples ratio for cross-entropy loss')
 
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
@@ -217,7 +218,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         # compute loss
         outputs = model(images)
         loss, partial_losses, num_corrects = criterion(outputs, cams, masks, labels,
-                                                       [0.2, 0.3, 0.3, 0.4, 0.5][round-1], opt.use_pseudo_mask)
+                                                       opt.sample_ratio, opt.use_pseudo_mask)
         total_corrects[0] += num_corrects[0]
         total_corrects[1] += num_corrects[1]
 

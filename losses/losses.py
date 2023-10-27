@@ -127,7 +127,7 @@ class PixelContrastLoss(nn.Module):
 
         embeddings = embeddings.permute(0, 2, 3, 1)
 
-        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index)
+        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, self.num_samples)
 
         fg_feats = embeddings[selected_pixels == 1]
         fg_labels = torch.ones(fg_feats.shape[0])

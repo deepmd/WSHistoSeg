@@ -22,6 +22,7 @@ do
       --temperature=0.1 \
       --base_temperature=0.07 \
       --num_samples=10 \
+      --sample_ratio=0.2 \
       --batch_size=32 \
       --num_workers=8 \
       --max_iters=3000 \
@@ -33,6 +34,6 @@ do
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=1001
+      --trial=1006
       #--debug
 done
