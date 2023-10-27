@@ -54,8 +54,9 @@ def parse_options():
     # contrastive loss
     parser.add_argument('--temperature', type=float, default=0.1, help='temperature in contrastive loss.')
     parser.add_argument('--base_temperature', type=float, default=0.07, help='base temperature in contrastive loss.')
-    parser.add_argument('--num_samples', type=int, default=10, help='max samples for contrastive loss')
-    parser.add_argument('--sample_ratio', type=float, default=0.2, help='samples ratio for cross-entropy loss')
+    # parser.add_argument('--num_samples', type=int, default=10, help='max samples for contrastive loss')
+    parser.add_argument('--sample_ratio_cl', type=float, default=0.01, help='samples ratio for contrastive loss')
+    parser.add_argument('--sample_ratio_ce', type=float, default=0.2, help='samples ratio for cross-entropy loss')
 
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
@@ -146,7 +147,7 @@ def set_loader(opt):
 def set_model(opt):
     model = create_model(opt).to(opt.device)
     criterion = ContrastCELoss(opt.ce_weights, opt.ignore_index, opt.loss_weight,
-                               opt.temperature, opt.base_temperature, opt.num_samples,
+                               opt.temperature, opt.base_temperature,
                                d_fg=0.996, d_bg=0.999, gamma=opt.gamma)
     optimizer, scheduler = get_optim_scheduler(model, opt)
 
@@ -203,9 +204,10 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
     ce_losses = AverageMeter()
     contrast_losses = AverageMeter()
     expand_losses = AverageMeter()
+    fg_sampled_correct = AverageMeter()
+    bg_sampled_correct = AverageMeter()
 
     end = time.time()
-    total_corrects = [0, 0]
     for data_dict in data_loaders['train']:
         data_time.update(time.time() - end)
 
@@ -217,10 +219,10 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
 
         # compute loss
         outputs = model(images)
-        loss, partial_losses, num_corrects = criterion(outputs, cams, masks, labels,
-                                                       opt.sample_ratio, opt.use_pseudo_mask)
-        total_corrects[0] += num_corrects[0]
-        total_corrects[1] += num_corrects[1]
+        loss, partial_losses, num_corrects, num_sampled = \
+            criterion(outputs, cams, masks, labels, opt.sample_ratio_cl, opt.sample_ratio_ce, opt.use_pseudo_mask)
+        fg_sampled_correct.update(num_corrects[0] / num_sampled[0], num_sampled[0])
+        bg_sampled_correct.update(num_corrects[1] / num_sampled[1], num_sampled[1])
 
         with torch.no_grad():
             losses.update(loss.item(), bsz)
@@ -258,6 +260,8 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                             f"CE Loss: {ce_losses.val:.3f} ({ce_losses.avg:.3f}) " +
                             f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t" +
                             f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t" +
+                            f"CoFG: {fg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count/losses.count:.1f})\t" +
+                            f"CoBG: {bg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count/losses.count:.1f})\t" +
                             "Learning rate: {}".format([param_group['lr'] for param_group in optimizer.param_groups]))
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter % opt.max_iters == 0:
@@ -291,7 +295,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
 
     opt.current_epoch += 1
 
-    return losses.avg, ce_losses.avg, contrast_losses.avg, total_corrects
+    return losses.avg, ce_losses.avg, contrast_losses.avg, [fg_sampled_correct.avg, bg_sampled_correct.avg]
 
 
 def main():
@@ -333,19 +337,17 @@ def main():
     while opt.current_iter < opt.max_iters:
         # opt.current_iter and opt.current_epoch are updated in the train function.
         time1 = time.time()
-        loss, ce_loss, contrast_loss, total_corrects = train(model, criterion, data_loaders,
-                                                             optimizer, scheduler, opt, round)
+        loss, ce_loss, contrast_loss, sample_accuracy = train(model, criterion, data_loaders,
+                                                              optimizer, scheduler, opt, round)
         time2 = time.time()
-        CoFG = total_corrects[0] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
-        CoBG = total_corrects[1] / (len(data_loaders['train'].dataset) * opt.num_samples) * 100
         opt.logger.info(f"[End Epoch {opt.current_epoch - 1}] Train Time: {(time2 - time1):0.2f}, " +
                         f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) " +
-                        f"CoFG: {CoFG:.3f}, CoBG: {CoBG:.3f}")
+                        f"CoFG: {sample_accuracy[0]*100:.3f}, CoBG: {sample_accuracy[1]*100:.3f}")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/ce_loss_avg', ce_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoFG', CoFG, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoBG', CoBG, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoFG', sample_accuracy[0]*100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoBG', sample_accuracy[1]*100, opt.current_epoch)
 
         if opt.current_epoch % opt.pseudo_labeling_step == 0:
             if round != opt.num_rounds:

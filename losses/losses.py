@@ -40,7 +40,7 @@ class FSCELoss(nn.Module):
 
 class ContrastCELoss(nn.Module):
     def __init__(self, class_weights, ignore_index, loss_weight,
-                 temperature, base_temperature, num_samples, d_fg, d_bg, gamma):
+                 temperature, base_temperature, d_fg, d_bg, gamma):
         super(ContrastCELoss, self).__init__()
 
         self.loss_weight = loss_weight
@@ -48,34 +48,34 @@ class ContrastCELoss(nn.Module):
         self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
         # self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
         self.contrast_criterion = PixelContrastLoss(temperature=temperature, base_temperature=base_temperature,
-                                                    ignore_index=self.ignore_index, num_samples=num_samples)
+                                                    ignore_index=self.ignore_index)
         self.expand_loss = ExpandLoss(d_fg, d_bg)
 
-    def forward(self, preds, cams, masks, labels, sample_ratio=0.2, use_pseudo_mask=False):
+    def forward(self, preds, cams, masks, labels, sample_ratio_cl, sample_ratio_ce, use_pseudo_mask):
         assert "seg" in preds
         assert "embed" in preds
 
         seg_preds = preds['seg']
         embedding = preds['embed']
 
-        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio) if use_pseudo_mask else masks
+        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio_ce) if use_pseudo_mask else masks
         target_mask = target_mask.to(seg_preds.device)
 
         loss = self.seg_criterion(seg_preds, target_mask)
-        loss_contrast, num_corrects = self.contrast_criterion(embedding, cams, masks, labels)
+        loss_contrast, num_corrects, num_sampled = \
+            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, labels)
         loss_expand = self.expand_loss(seg_preds)
 
         return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
-               {'ce': loss, 'contrast': loss_contrast, 'expand': loss_expand}, num_corrects
+               {'ce': loss, 'contrast': loss_contrast, 'expand': loss_expand}, num_corrects, num_sampled
 
 
 class PixelContrastLoss(nn.Module):
-    def __init__(self, temperature, base_temperature, ignore_index, num_samples):
+    def __init__(self, temperature, base_temperature, ignore_index):
         super(PixelContrastLoss, self).__init__()
 
         self.temperature = temperature
         self.base_temperature = base_temperature
-        self.num_samples = num_samples
         self.ignore_index = ignore_index
 
     def _contrastive(self, feats_, labels_):
@@ -117,7 +117,7 @@ class PixelContrastLoss(nn.Module):
 
         return loss
 
-    def forward(self, embeddings, cams, masks, labels=None):
+    def forward(self, embeddings, cams, masks, sample_ratio, labels=None):
         h, w = embeddings.size()[2:]
         masks = F.interpolate(masks.float(), (h, w), mode='nearest')
         masks = masks.squeeze(1).long()
@@ -127,7 +127,7 @@ class PixelContrastLoss(nn.Module):
 
         embeddings = embeddings.permute(0, 2, 3, 1)
 
-        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, self.num_samples)
+        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, sample_ratio)
 
         fg_feats = embeddings[selected_pixels == 1]
         fg_labels = torch.ones(fg_feats.shape[0])
@@ -145,9 +145,11 @@ class PixelContrastLoss(nn.Module):
 
         contrast_loss = self._contrastive(all_feats, all_labels)
 
+        num_fg = (selected_pixels == 1).sum()
+        num_bg = (selected_pixels == 0).sum()
         num_fg_corrects = int((masks[selected_pixels == 1] == 1).sum())
         num_bg_corrects = int((masks[selected_pixels == 0] == 0).sum())
-        return contrast_loss, [num_fg_corrects, num_bg_corrects]
+        return contrast_loss, [num_fg_corrects, num_bg_corrects], [num_fg, num_bg]
 
 
 class ExpandLoss(nn.Module):
