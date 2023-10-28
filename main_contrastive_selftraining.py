@@ -55,7 +55,7 @@ def parse_options():
     parser.add_argument('--temperature', type=float, default=0.1, help='temperature in contrastive loss.')
     parser.add_argument('--base_temperature', type=float, default=0.07, help='base temperature in contrastive loss.')
     # parser.add_argument('--num_samples', type=int, default=10, help='max samples for contrastive loss')
-    parser.add_argument('--sample_ratio_cl', type=float, default=0.01, help='samples ratio for contrastive loss')
+    parser.add_argument('--sample_ratio_cl', type=float, default=0.03, help='samples ratio for contrastive loss')
     parser.add_argument('--sample_ratio_ce', type=float, default=0.2, help='samples ratio for cross-entropy loss')
 
     # train settings

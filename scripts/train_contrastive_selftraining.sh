@@ -21,7 +21,7 @@ do
       --loss_weight=0.1 \
       --temperature=0.1 \
       --base_temperature=0.07 \
-      --sample_ratio_cl=0.01 \
+      --sample_ratio_cl=0.03 \
       --sample_ratio_ce=0.2 \
       --batch_size=32 \
       --num_workers=8 \
@@ -34,6 +34,6 @@ do
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=1007
+      --trial=1011
       #--debug
 done

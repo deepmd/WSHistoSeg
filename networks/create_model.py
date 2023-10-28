@@ -14,7 +14,7 @@ def create_model(cfg):
         model = STDCLModel(encoder_name=cfg.encoder_name,
                            num_classes=cfg.num_classes, proj_dim=cfg.proj_dim, use_aspp=cfg.use_aspp)
     elif cfg.task.lower() == 'unet':
-        model = UnetNEGEV(encoder_name=cfg.encoder_name, seg_h_out_channels=2)
+        model = UnetNEGEV(encoder_name=cfg.encoder_name, seg_h_out_channels=cfg.num_classes)
     else:
         logger.info(f"{cfg.model_name} model is not valid!")
         raise ValueError(f"{cfg.model_name} model is not valid!")
