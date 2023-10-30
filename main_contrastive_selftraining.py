@@ -261,7 +261,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                             f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t" +
                             f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t" +
                             f"CoFG: {fg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count/losses.count:.1f})\t" +
-                            f"CoBG: {bg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count/losses.count:.1f})\t" +
+                            f"CoBG: {bg_sampled_correct.avg:.3f} (#{bg_sampled_correct.count/losses.count:.1f})\t" +
                             "Learning rate: {}".format([param_group['lr'] for param_group in optimizer.param_groups]))
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter % opt.max_iters == 0:
