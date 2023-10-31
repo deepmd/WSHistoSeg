@@ -20,10 +20,11 @@ do
       --loss_weight=0.1 \
       --temperature=0.1 \
       --base_temperature=0.07 \
+      --labeled_sample_ratio_cl=0.5 \
       --sample_ratio_cl=0.03 \
       --sample_ratio_ce=0.2 \
       --batch_size=32 \
-      --labeled_batch_ratio=0.1 \
+      --labeled_batch_ratio=0.5 \
       --num_workers=8 \
       --num_epochs=1000 \
       --num_rounds=5 \
@@ -36,6 +37,6 @@ do
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=2001
+      --trial=2005
       #--debug
 done

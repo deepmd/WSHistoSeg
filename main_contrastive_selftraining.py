@@ -56,8 +56,13 @@ def parse_options():
     parser.add_argument('--temperature', type=float, default=0.1, help='temperature in contrastive loss.')
     parser.add_argument('--base_temperature', type=float, default=0.07, help='base temperature in contrastive loss.')
     # parser.add_argument('--num_samples', type=int, default=10, help='max samples for contrastive loss')
-    parser.add_argument('--sample_ratio_cl', type=float, default=0.03, help='samples ratio for contrastive loss')
-    parser.add_argument('--sample_ratio_ce', type=float, default=0.2, help='samples ratio for cross-entropy loss')
+    parser.add_argument('--sample_ratio_cl', type=float, default=0.03,
+                        help='samples ratio for contrastive loss on unlabeled images')
+    parser.add_argument('--labeled_sample_ratio_cl', type=float, default=1,
+                        help='samples ratio for contrastive loss on labeled images. '
+                             'Default value of 1 may cause a CUDA OOM error if the value of labeled_batch_ratio is high!')
+    parser.add_argument('--sample_ratio_ce', type=float, default=0.2,
+                        help='samples ratio for cross-entropy loss on unlabeled images')
 
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
@@ -270,7 +275,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         # compute loss
         outputs = model(images)
         loss, partial_losses, num_corrects, num_sampled = \
-            criterion(outputs, cams, masks, labels, opt.sample_ratio_cl, opt.sample_ratio_ce, use_pseudo_mask)
+            criterion(outputs, cams, masks, labels, opt.labeled_sample_ratio_cl, opt.sample_ratio_cl, opt.sample_ratio_ce, use_pseudo_mask)
         fg_sampled_correct.update(num_corrects[0] / num_sampled[0], num_sampled[0])
         bg_sampled_correct.update(num_corrects[1] / num_sampled[1], num_sampled[1])
 

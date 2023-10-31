@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from .utils import generate_foreground_background_mask, generate_pseudo_mask_by_cam, sample_bg
+from .utils import generate_foreground_background_mask, generate_pseudo_mask_by_cam, sample_bg, sample_foreground_background_mask
 
 
 # Cross-entropy Loss
@@ -51,7 +51,7 @@ class ContrastCELoss(nn.Module):
                                                     ignore_index=self.ignore_index)
         self.expand_loss = ExpandLoss(d_fg, d_bg)
 
-    def forward(self, preds, cams, masks, labels, sample_ratio_cl, sample_ratio_ce, use_pseudo_mask):
+    def forward(self, preds, cams, masks, labels, labeled_sample_ratio_cl, sample_ratio_cl, sample_ratio_ce, use_pseudo_mask):
         assert "seg" in preds
         assert "embed" in preds
 
@@ -64,7 +64,7 @@ class ContrastCELoss(nn.Module):
 
         loss = self.seg_criterion(seg_preds, target_mask)
         loss_contrast, num_corrects, num_sampled = \
-            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, use_pseudo_mask, labels)
+            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, labeled_sample_ratio_cl, use_pseudo_mask, labels)
         loss_expand = self.expand_loss(seg_preds)
 
         return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
@@ -118,7 +118,7 @@ class PixelContrastLoss(nn.Module):
 
         return loss
 
-    def forward(self, embeddings, cams, masks, sample_ratio, use_pseudo_mask, labels=None):
+    def forward(self, embeddings, cams, masks, sample_ratio, labeled_sample_ratio, use_pseudo_mask, labels=None):
         h, w = embeddings.size()[2:]
         masks = F.interpolate(masks.float(), (h, w), mode='nearest')
         masks = masks.squeeze(1).byte()
@@ -130,6 +130,8 @@ class PixelContrastLoss(nn.Module):
 
         selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, sample_ratio)
         selected_pixels = selected_pixels.to(masks.device)
+        if labeled_sample_ratio < 1:
+            masks = sample_foreground_background_mask(masks, self.ignore_index, labeled_sample_ratio)
         selected_pixels = torch.where(use_pseudo_mask[:, None, None], selected_pixels, masks)
 
         fg_feats = embeddings[selected_pixels == 1]

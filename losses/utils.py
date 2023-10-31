@@ -53,3 +53,12 @@ def sample_bg(bg_feats, fg_feats, num_samples=10):
     selected_bg_features = selected_bg_features.view(-1, selected_bg_features.size(-1))
     return selected_bg_features, bg_indices
 
+
+def sample_foreground_background_mask(masks, ignore_index, sample_ratio, method='random'):
+    flatten_masks = masks.view(masks.size(0), -1)
+    num_pixels = flatten_masks.size(1)
+    num_ignored = num_pixels - int(sample_ratio * num_pixels)
+    bsz = flatten_masks.size(0)
+    mask_ignored_indices = torch.stack([torch.randperm(num_pixels)[:num_ignored] for _ in range(bsz)]).to(masks.device)
+    flatten_masks = flatten_masks.scatter(1, mask_ignored_indices, ignore_index)
+    return flatten_masks.view(masks.shape)
