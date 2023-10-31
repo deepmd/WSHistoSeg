@@ -1,7 +1,7 @@
 import os
 
 
-def get_image_ids(root):
+def get_image_ids(root, suffix=None):
     """
     image_ids.txt has the structure
 
@@ -11,7 +11,7 @@ def get_image_ids(root):
     path/to/image3.jpg
     ...
     """
-    file_path = os.path.join(root, 'image_ids.txt')
+    file_path = os.path.join(root, 'image_ids.txt' if not suffix else f'image_ids_{suffix}.txt')
     image_ids = []
     with open(file_path) as f:
         for line in f.readlines():

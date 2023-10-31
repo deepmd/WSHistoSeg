@@ -58,12 +58,13 @@ class ContrastCELoss(nn.Module):
         seg_preds = preds['seg']
         embedding = preds['embed']
 
-        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio_ce) if use_pseudo_mask else masks
+        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio_ce)
         target_mask = target_mask.to(seg_preds.device)
+        target_mask = torch.where(use_pseudo_mask[:, None, None, None], target_mask, masks)
 
         loss = self.seg_criterion(seg_preds, target_mask)
         loss_contrast, num_corrects, num_sampled = \
-            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, labels)
+            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, use_pseudo_mask, labels)
         loss_expand = self.expand_loss(seg_preds)
 
         return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
@@ -117,10 +118,10 @@ class PixelContrastLoss(nn.Module):
 
         return loss
 
-    def forward(self, embeddings, cams, masks, sample_ratio, labels=None):
+    def forward(self, embeddings, cams, masks, sample_ratio, use_pseudo_mask, labels=None):
         h, w = embeddings.size()[2:]
         masks = F.interpolate(masks.float(), (h, w), mode='nearest')
-        masks = masks.squeeze(1).long()
+        masks = masks.squeeze(1).byte()
 
         cams = F.interpolate(cams, (h, w), mode='bicubic', align_corners=True)
         cams = cams.squeeze(1)
@@ -128,6 +129,8 @@ class PixelContrastLoss(nn.Module):
         embeddings = embeddings.permute(0, 2, 3, 1)
 
         selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, sample_ratio)
+        selected_pixels = selected_pixels.to(masks.device)
+        selected_pixels = torch.where(use_pseudo_mask[:, None, None], selected_pixels, masks)
 
         fg_feats = embeddings[selected_pixels == 1]
         fg_labels = torch.ones(fg_feats.shape[0])

@@ -29,6 +29,8 @@ def get_val_transforms(opt):
 
 def get_transforms(opt):
     return {'train': get_train_transforms(opt),
+            'train_unlabeled': get_train_transforms(opt),
+            'train_labeled': get_train_transforms(opt),
             'valcl': get_val_transforms(opt),
             'test': get_val_transforms(opt),
             'train_ps': get_val_transforms(opt)}

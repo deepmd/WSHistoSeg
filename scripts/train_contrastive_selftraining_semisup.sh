@@ -23,6 +23,7 @@ do
       --sample_ratio_cl=0.03 \
       --sample_ratio_ce=0.2 \
       --batch_size=32 \
+      --labeled_batch_ratio=0.1 \
       --num_workers=8 \
       --num_epochs=1000 \
       --num_rounds=5 \
@@ -30,9 +31,11 @@ do
       --resize_size=256 \
       --crop_size=224 \
       --metadata_root=datasets/folds/GLAS/fold-0 \
+      --labeled_suffix=labeled_7 \
+      --unlabeled_suffix=unlabeled_60 \
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=2002
+      --trial=2001
       #--debug
 done

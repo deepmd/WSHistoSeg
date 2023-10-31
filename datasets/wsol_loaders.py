@@ -11,10 +11,11 @@ from .get_paths import *
 
 
 class WsolDataset(Dataset):
-    def __init__(self, data_root, metadata_root, transforms=None):
+    def __init__(self, data_root, metadata_root, suffix=None, transforms=None):
         super(WsolDataset, self).__init__()
         self.data_root = data_root
-        self.image_ids = get_image_ids(metadata_root)
+        self.suffix = suffix
+        self.image_ids = get_image_ids(metadata_root, suffix)
         self.image_labels = get_class_labels(metadata_root)
         self.mask_paths = get_mask_paths(metadata_root)[0]
         self.cam_paths = get_cam_paths(metadata_root)
@@ -73,12 +74,14 @@ class WsolDataset(Dataset):
                 'image_id': image_id,
                 'mask': mask,
                 'cam': cam,
+                'suffix': self.suffix
             }
         return {
             'image': image,
             'label': image_label,
             'image_id': image_id,
             'mask': mask,
+            'suffix': self.suffix
         }
 
 

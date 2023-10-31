@@ -3,16 +3,19 @@ import os
 import time
 import argparse
 import random
+import math
+
 import numpy as np
 from tqdm import tqdm
 from typing import Optional
 from torch import Tensor
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
+from datasets.combined_loader import CombinedDataLoaders
 from utils import set_up_logger, log_parameters, save_checkpoint
 from datasets import get_transforms
 from optim_scheduler import get_optim_scheduler
@@ -35,8 +38,6 @@ def parse_options():
     parser.add_argument('--proj_dim', type=int, default=128, help='num of channels in output of projection head')
     parser.add_argument('--num_classes', type=int, default=2, help='number of classes.')
     parser.add_argument('--pretrained', type=str, default=None, help='path to pretrained weights.')
-    parser.add_argument('--use_pseudo_mask', dest="use_pseudo_mask", action='store_true',
-                        help='using pseudo masks for training.')
     parser.add_argument("--use_aspp", dest="use_aspp", action="store_true",
                         help="use aspp module at the end of encoder.")
 
@@ -60,8 +61,10 @@ def parse_options():
 
     # train settings
     parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
+    parser.add_argument('--labeled_batch_ratio', type=float, default=0,
+                        help='how much of each batch should contain labeled samples.')
     parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
-    parser.add_argument('--max_iters', type=int, default=3000, help='max epochs for training.')
+    parser.add_argument('--num_epochs', type=int, default=1000, help='max epochs for training.')
     parser.add_argument('--num_rounds', type=int, default=5, help='max rounds for training.')
     parser.add_argument('--round', type=int, help='current round number.')
     parser.add_argument('--pseudo_labeling_step', type=int, default=200, help='')
@@ -69,6 +72,8 @@ def parse_options():
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
     parser.add_argument('--crop_size', type=int, default=224, help='crop size')
     parser.add_argument('--metadata_root', type=str, help='path to related fold')
+    parser.add_argument('--labeled_suffix', type=str, default='', help='labeled image_ids suffix')
+    parser.add_argument('--unlabeled_suffix', type=str, default='', help='unlabeled image_ids suffix')
 
     # # other setting
     parser.add_argument('--print_freq', type=int, default=1, help='print frequency')
@@ -81,6 +86,14 @@ def parse_options():
     opt.ce_weights = [1.0, 1.0]
     opt.ignore_index = 255
     # opt.pseudo_labeling_step = int(opt.max_iters / opt.num_rounds) + 1
+
+    opt.semi_superviced = False
+    if opt.labeled_suffix and opt.unlabeled_suffix:
+        opt.semi_superviced = True
+        if opt.labeled_batch_ratio == 0:
+            raise ValueError("When specifying labeled_suffix and unlabeled_suffix, labeled_batch_ratio must be greater than 0!")
+    elif opt.labeled_suffix or opt.unlabeled_suffix:
+        raise ValueError("Both labeled_suffix and unlabeled_suffix must be specified!")
 
     opt.model_name = f"glas_model_{opt.encoder_name}_{opt.optimizer}" + \
                      f"_lr_{opt.learning_rate}_bsz_{opt.batch_size}_loss_CE_CL_trial_{opt.trial}"
@@ -106,14 +119,32 @@ def set_loader(opt):
     logger = opt.logger
     data_transforms = get_transforms(opt)
 
+    if opt.semi_superviced:
+        train_splits = ['train_unlabeled', 'train_labeled']
+        other_splits = ['valcl', 'test', 'train_ps']
+        suffixes = [opt.unlabeled_suffix, opt.labeled_suffix, '', '', '']
+        labeled_batch_size = math.ceil(opt.batch_size * opt.labeled_batch_ratio)
+        unlabeled_batch_size = opt.batch_size - labeled_batch_size
+        train_batch_sizes = [unlabeled_batch_size, labeled_batch_size]
+    else:
+        train_splits = ['train']
+        other_splits = ['valcl', 'test', 'train_ps']
+        suffixes = [''] * 4
+        train_batch_sizes = [opt.batch_size]
+
     datasets = {
         split: WsolDataset(
             data_root=opt.data_root,
-            metadata_root=os.path.join(opt.metadata_root, split if split != 'train_ps' else 'train'),
+            metadata_root=os.path.join(opt.metadata_root, split if not split.startswith('train') else 'train'),
+            suffix=suffix,
             transforms=data_transforms[split]
         )
-        for split in ['train', 'valcl', 'test', 'train_ps']
+        for split, suffix in zip(train_splits + other_splits, suffixes)
     }
+
+    total_train_size = sum(len(datasets[split]) for split in train_splits)
+    opt.iters_in_epoch = math.ceil(total_train_size / opt.batch_size)
+    opt.max_iters = opt.num_epochs * opt.iters_in_epoch
 
     def seed_worker(worker_id):
         worker_seed = torch.initial_seed() % 2 ** 32
@@ -123,23 +154,40 @@ def set_loader(opt):
     g = torch.Generator()
     g.manual_seed(opt.seed)
 
-    data_loaders = {
-        split: DataLoader(
+    train_loader = CombinedDataLoaders(
+        DataLoader(
             dataset=datasets[split],
-            batch_size=opt.batch_size if split == 'train' else 1,
-            shuffle=True if split == 'train' else False,
+            batch_size=batch_size,
+            sampler=RandomSampler(
+                data_source=datasets[split],
+                replacement=True,
+                num_samples=batch_size * opt.max_iters
+            ),
             num_workers=opt.num_workers,
             worker_init_fn=seed_worker,
             generator=g
         )
-        for split in ['train', 'valcl', 'test', 'train_ps']
+        for split, batch_size in zip(train_splits, train_batch_sizes)
+    )
+    data_loaders = {
+        split: DataLoader(
+            dataset=datasets[split],
+            batch_size=1,
+            shuffle=False,
+            num_workers=opt.num_workers,
+            worker_init_fn=seed_worker,
+            generator=g
+        )
+        for split in other_splits
     }
     # pin_memory = True,
     # drop_last = True,
+    data_loaders.update({'train': train_loader})
 
     logger.info(f"Summary of the data:")
-    logger.info(f"Number of images in training set = {len(datasets['train'])}")
+    logger.info(f"Number of images in training set = {total_train_size}")
     logger.info(f"Number of images in validation set = {len(datasets['valcl'])}")
+    logger.info(f"Number of images in test set = {len(datasets['test'])}")
 
     return data_loaders
 
@@ -216,11 +264,13 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         labels = data_dict['label'].to(opt.device)
         masks = data_dict['mask'].to(opt.device)
         cams = data_dict['cam']
+        use_pseudo_mask = torch.tensor([suffix == opt.unlabeled_suffix for suffix in data_dict['suffix']],
+                                       dtype=torch.bool, device=opt.device)
 
         # compute loss
         outputs = model(images)
         loss, partial_losses, num_corrects, num_sampled = \
-            criterion(outputs, cams, masks, labels, opt.sample_ratio_cl, opt.sample_ratio_ce, opt.use_pseudo_mask)
+            criterion(outputs, cams, masks, labels, opt.sample_ratio_cl, opt.sample_ratio_ce, use_pseudo_mask)
         fg_sampled_correct.update(num_corrects[0] / num_sampled[0], num_sampled[0])
         bg_sampled_correct.update(num_corrects[1] / num_sampled[1], num_sampled[1])
 
@@ -290,7 +340,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
             model.train()
             criterion.train()
 
-        if opt.current_iter % opt.max_iters == 0:
+        if (opt.current_iter - 1) % opt.iters_in_epoch == 0 or opt.current_iter > opt.max_iters:
             break
 
     opt.current_epoch += 1
