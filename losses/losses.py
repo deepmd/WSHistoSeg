@@ -40,31 +40,35 @@ class FSCELoss(nn.Module):
 
 class ContrastCELoss(nn.Module):
     def __init__(self, class_weights, ignore_index, loss_weight,
-                 temperature, base_temperature, d_fg, d_bg, gamma):
+                 temperature, base_temperature, d_fg, d_bg, gamma,
+                 labeled_sample_ratio_cl, sample_ratio_cl, sample_ratio_ce):
         super(ContrastCELoss, self).__init__()
 
         self.loss_weight = loss_weight
         self.ignore_index = ignore_index
+        self.sample_ratio_ce = sample_ratio_ce
         self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
         # self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
-        self.contrast_criterion = PixelContrastLoss(temperature=temperature, base_temperature=base_temperature,
-                                                    ignore_index=self.ignore_index)
+        self.contrast_criterion = PixelContrastLoss(
+            temperature=temperature, base_temperature=base_temperature, ignore_index=self.ignore_index,
+            labeled_sample_ratio=labeled_sample_ratio_cl, sample_ratio=sample_ratio_cl
+        )
         self.expand_loss = ExpandLoss(d_fg, d_bg)
 
-    def forward(self, preds, cams, masks, labels, labeled_sample_ratio_cl, sample_ratio_cl, sample_ratio_ce, use_pseudo_mask):
+    def forward(self, preds, cams, masks, labels, use_pseudo_mask):
         assert "seg" in preds
         assert "embed" in preds
 
         seg_preds = preds['seg']
         embedding = preds['embed']
 
-        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, sample_ratio_ce)
+        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, self.sample_ratio_ce)
         target_mask = target_mask.to(seg_preds.device)
         target_mask = torch.where(use_pseudo_mask[:, None, None, None], target_mask, masks)
 
         loss = self.seg_criterion(seg_preds, target_mask)
         loss_contrast, num_corrects, num_sampled = \
-            self.contrast_criterion(embedding, cams, masks, sample_ratio_cl, labeled_sample_ratio_cl, use_pseudo_mask, labels)
+            self.contrast_criterion(embedding, cams, masks, use_pseudo_mask, labels)
         loss_expand = self.expand_loss(seg_preds)
 
         return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
@@ -72,12 +76,14 @@ class ContrastCELoss(nn.Module):
 
 
 class PixelContrastLoss(nn.Module):
-    def __init__(self, temperature, base_temperature, ignore_index):
+    def __init__(self, temperature, base_temperature, ignore_index, labeled_sample_ratio, sample_ratio):
         super(PixelContrastLoss, self).__init__()
 
         self.temperature = temperature
         self.base_temperature = base_temperature
         self.ignore_index = ignore_index
+        self.labeled_sample_ratio = labeled_sample_ratio
+        self.sample_ratio = sample_ratio
 
     def _contrastive(self, feats_, labels_):
         anchor_num, n_view = feats_.shape[0], feats_.shape[1]
@@ -118,7 +124,7 @@ class PixelContrastLoss(nn.Module):
 
         return loss
 
-    def forward(self, embeddings, cams, masks, sample_ratio, labeled_sample_ratio, use_pseudo_mask, labels=None):
+    def forward(self, embeddings, cams, masks, use_pseudo_mask, labels=None):
         h, w = embeddings.size()[2:]
         masks = F.interpolate(masks.float(), (h, w), mode='nearest')
         masks = masks.squeeze(1).byte()
@@ -128,10 +134,10 @@ class PixelContrastLoss(nn.Module):
 
         embeddings = embeddings.permute(0, 2, 3, 1)
 
-        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, sample_ratio)
+        selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, self.sample_ratio)
         selected_pixels = selected_pixels.to(masks.device)
-        if labeled_sample_ratio < 1:
-            masks = sample_foreground_background_mask(masks, self.ignore_index, labeled_sample_ratio)
+        if self.labeled_sample_ratio < 1:
+            masks = sample_foreground_background_mask(masks, self.ignore_index, self.labeled_sample_ratio)
         selected_pixels = torch.where(use_pseudo_mask[:, None, None], selected_pixels, masks)
 
         fg_feats = embeddings[selected_pixels == 1]

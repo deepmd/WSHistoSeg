@@ -201,7 +201,10 @@ def set_model(opt):
     model = create_model(opt).to(opt.device)
     criterion = ContrastCELoss(opt.ce_weights, opt.ignore_index, opt.loss_weight,
                                opt.temperature, opt.base_temperature,
-                               d_fg=0.996, d_bg=0.999, gamma=opt.gamma)
+                               d_fg=0.996, d_bg=0.999, gamma=opt.gamma,
+                               labeled_sample_ratio_cl=opt.labeled_sample_ratio_cl,
+                               sample_ratio_cl=opt.sample_ratio_cl,
+                               sample_ratio_ce=opt.sample_ratio_ce)
     optimizer, scheduler = get_optim_scheduler(model, opt)
 
     return model, criterion, optimizer, scheduler
@@ -274,8 +277,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
 
         # compute loss
         outputs = model(images)
-        loss, partial_losses, num_corrects, num_sampled = \
-            criterion(outputs, cams, masks, labels, opt.labeled_sample_ratio_cl, opt.sample_ratio_cl, opt.sample_ratio_ce, use_pseudo_mask)
+        loss, partial_losses, num_corrects, num_sampled = criterion(outputs, cams, masks, labels, use_pseudo_mask)
         fg_sampled_correct.update(num_corrects[0] / num_sampled[0], num_sampled[0])
         bg_sampled_correct.update(num_corrects[1] / num_sampled[1], num_sampled[1])
 

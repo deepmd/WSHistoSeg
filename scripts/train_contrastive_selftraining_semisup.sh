@@ -37,6 +37,6 @@ do
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=2005
+      --trial=2004
       #--debug
 done
