@@ -72,7 +72,6 @@ def parse_options():
     parser.add_argument('--num_epochs', type=int, default=1000, help='max epochs for training.')
     parser.add_argument('--num_rounds', type=int, default=5, help='max rounds for training.')
     parser.add_argument('--round', type=int, help='current round number.')
-    parser.add_argument('--pseudo_labeling_step', type=int, default=200, help='')
 
     parser.add_argument('--resize_size', type=int, default=256, help='resize size')
     parser.add_argument('--crop_size', type=int, default=224, help='crop size')
@@ -90,11 +89,12 @@ def parse_options():
 
     opt.ce_weights = [1.0, 1.0]
     opt.ignore_index = 255
-    # opt.pseudo_labeling_step = int(opt.max_iters / opt.num_rounds) + 1
+    opt.epochs_in_round = int(opt.num_epochs / opt.num_rounds)
+    opt.num_epochs = opt.epochs_in_round * opt.num_rounds
 
-    opt.semi_superviced = False
+    opt.semi_supervised = False
     if opt.labeled_suffix and opt.unlabeled_suffix:
-        opt.semi_superviced = True
+        opt.semi_supervised = True
         if opt.labeled_batch_ratio == 0:
             raise ValueError("When specifying labeled_suffix and unlabeled_suffix, labeled_batch_ratio must be greater than 0!")
     elif opt.labeled_suffix or opt.unlabeled_suffix:
@@ -124,7 +124,7 @@ def set_loader(opt):
     logger = opt.logger
     data_transforms = get_transforms(opt)
 
-    if opt.semi_superviced:
+    if opt.semi_supervised:
         train_splits = ['train_unlabeled', 'train_labeled']
         other_splits = ['valcl', 'test', 'train_ps']
         suffixes = [opt.unlabeled_suffix, opt.labeled_suffix, '', '', '']
@@ -149,7 +149,7 @@ def set_loader(opt):
 
     total_train_size = sum(len(datasets[split]) for split in train_splits)
     opt.iters_in_epoch = math.ceil(total_train_size / opt.batch_size)
-    opt.max_iters = opt.num_epochs * opt.iters_in_epoch
+    opt.iters_in_round = opt.epochs_in_round * opt.iters_in_epoch
 
     def seed_worker(worker_id):
         worker_seed = torch.initial_seed() % 2 ** 32
@@ -166,7 +166,7 @@ def set_loader(opt):
             sampler=RandomSampler(
                 data_source=datasets[split],
                 replacement=True,
-                num_samples=batch_size * opt.max_iters
+                num_samples=batch_size * opt.iters_in_round
             ),
             num_workers=opt.num_workers,
             worker_init_fn=seed_worker,
@@ -297,9 +297,6 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        # updating num of iterations till now
-        opt.current_iter += 1
-
         # add info to tensorboard
         opt.tb_logger.add_scalar('train/total_loss', loss, opt.current_iter)
         opt.tb_logger.add_scalar('train/ce_loss', partial_losses['ce'], opt.current_iter)
@@ -310,7 +307,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         # print info
         if opt.current_iter % opt.print_freq == 0:
             opt.logger.info(f"[Train] [Epoch {opt.current_epoch}] " +
-                            f"[Iteration {opt.current_iter}/{opt.max_iters}] " +
+                            f"[Iteration {opt.current_iter}/{opt.iters_in_round}] " +
                             f"BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t" +
                             f"DT {data_time.val:.3f} ({data_time.avg:.3f})\t" +
                             f"Total Loss: {losses.val:.3f} ({losses.avg:.3f}) " +
@@ -321,7 +318,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                             f"CoBG: {bg_sampled_correct.avg:.3f} (#{bg_sampled_correct.count/losses.count:.1f})\t" +
                             "Learning rate: {}".format([param_group['lr'] for param_group in optimizer.param_groups]))
 
-        if opt.current_iter % opt.eval_freq == 0 or opt.current_iter % opt.max_iters == 0:
+        if opt.current_iter % opt.eval_freq == 0 or opt.current_iter == opt.iters_in_round:
             for split in ['valcl', 'test']:
                 metrics = evaluate(model, data_loaders[split], criterion, opt)
                 opt.logger.info(f"[{split.upper()}] [Epoch {opt.current_epoch}] "
@@ -337,20 +334,22 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                     # save model
                     filename = f"ckpt_{split}_rnd_{round}_iter_{opt.current_iter}_{metrics['PXAP']}.pth"
                     save_file = os.path.join(opt.save_folder, filename)
-                    if opt.current_iter % opt.max_iters == 0:
-                        save_file = os.path.join(opt.save_folder, f"last_{metrics['PXAP']}.pth")
                     save_checkpoint(model, optimizer, opt, opt.current_iter, save_file)
 
                 opt.logger.info(f"[BEST PXAP on {split.upper()}={opt.best_val_pxap[split]}]")
+
+                if opt.current_iter == opt.iters_in_round:
+                    save_file = os.path.join(opt.save_folder, f"ckpt_{split}_rnd_{round}_last_{metrics['PXAP']}.pth")
+                    save_checkpoint(model, optimizer, opt, opt.current_iter, save_file)
 
             # changing the phase of the model to train
             model.train()
             criterion.train()
 
-        if (opt.current_iter - 1) % opt.iters_in_epoch == 0 or opt.current_iter > opt.max_iters:
+        # updating num of iterations till now
+        opt.current_iter += 1
+        if (opt.current_iter - 1) % opt.iters_in_epoch == 0:
             break
-
-    opt.current_epoch += 1
 
     return losses.avg, ce_losses.avg, contrast_losses.avg, [fg_sampled_correct.avg, bg_sampled_correct.avg]
 
@@ -391,13 +390,13 @@ def main():
     opt.current_iter = 1
     opt.best_val_pxap = {'valcl': -1, 'test': -1}
     round = opt.round
-    while opt.current_iter < opt.max_iters:
-        # opt.current_iter and opt.current_epoch are updated in the train function.
+    while opt.current_epoch <= opt.epochs_in_round:
+        # opt.current_iter are updated in the train function.
         time1 = time.time()
         loss, ce_loss, contrast_loss, sample_accuracy = train(model, criterion, data_loaders,
                                                               optimizer, scheduler, opt, round)
         time2 = time.time()
-        opt.logger.info(f"[End Epoch {opt.current_epoch - 1}] Train Time: {(time2 - time1):0.2f}, " +
+        opt.logger.info(f"[End Epoch {opt.current_epoch}] Train Time: {(time2 - time1):0.2f}, " +
                         f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) " +
                         f"CoFG: {sample_accuracy[0]*100:.3f}, CoBG: {sample_accuracy[1]*100:.3f}")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
@@ -406,23 +405,25 @@ def main():
         opt.tb_logger.add_scalar('train/CoFG', sample_accuracy[0]*100, opt.current_epoch)
         opt.tb_logger.add_scalar('train/CoBG', sample_accuracy[1]*100, opt.current_epoch)
 
-        if opt.current_epoch % opt.pseudo_labeling_step == 0:
-            if round != opt.num_rounds:
-                model_ = create_model(opt).to(opt.device)
-                # Loading best model in previous iterations
-                checkpoint_path = glob.glob(os.path.join(opt.save_folder,
-                f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
-                state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-                model_.load_state_dict(state_dict['model'])
-                # Generating CAMs
-                save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
-                save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
-                # round += 1
-                # Restarting optimizer and scheduler to initial state
-                # opt.current_epoch = 1
-                # opt.current_iter = 1
-                # model, ـ, optimizer, scheduler = set_model(opt)
-            break
+        opt.current_epoch += 1
+
+    logger.info(f'Round {round} finished.')
+    if round != opt.num_rounds:
+        model_ = create_model(opt).to(opt.device)
+        # Loading best model in previous iterations
+        checkpoint_path = glob.glob(os.path.join(opt.save_folder,
+                                                 f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
+        logger.info(f"Loading best checkpoint '{checkpoint_path}'")
+        state_dict = torch.load(checkpoint_path, map_location=opt.device)
+        model_.load_state_dict(state_dict['model'])
+        # Generating CAMs
+        save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
+        save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
+        # round += 1
+        # Restarting optimizer and scheduler to initial state
+        # opt.current_epoch = 1
+        # opt.current_iter = 1
+        # model, ـ, optimizer, scheduler = set_model(opt)
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "

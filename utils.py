@@ -129,7 +129,6 @@ def is_required_grad(wsol_method):
 
 
 def save_pseudo_labels(model, data_loaders, save_path, round, logger, device):
-    logger.info(f'Round {round} finished and round {round+1} is starting:')
     os.rename(save_path, save_path + f'_round{round}')
     os.makedirs(save_path, exist_ok=False)
 

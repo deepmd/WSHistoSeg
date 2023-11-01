@@ -1,6 +1,9 @@
 #!/bin/bash
 
-for r in {1..5}
+TRIAL_NO=2010
+NUM_ROUNDS=5
+
+for ((r=1; r<=$NUM_ROUNDS; r++))
 do
     python main_contrastive_selftraining.py \
       --data_root=datasets/GlaS \
@@ -27,8 +30,7 @@ do
       --labeled_batch_ratio=0.5 \
       --num_workers=8 \
       --num_epochs=1000 \
-      --num_rounds=5 \
-      --pseudo_labeling_step=200 \
+      --num_rounds=$NUM_ROUNDS \
       --resize_size=256 \
       --crop_size=224 \
       --metadata_root=datasets/folds/GLAS/fold-0 \
@@ -37,6 +39,13 @@ do
       --print_freq=1 \
       --eval_freq=30 \
       --round=$r \
-      --trial=2004
+      --trial=$TRIAL_NO
       #--debug
 done
+
+# moving generated pseudo-masks and prepare for a new trial
+CAMS_PATH=datasets/GlaS/Warwick_QU_Dataset_\(Released_2016_07_08\)/CAMs
+mv $CAMS_PATH/Layer4 $CAMS_PATH/Layer4_round$NUM_ROUNDS
+mv $CAMS_PATH/Layer4_round1 $CAMS_PATH/Layer4
+mkdir $CAMS_PATH/$TRIAL_NO
+for ((r=2; r<=$NUM_ROUNDS; r++)); do mv $CAMS_PATH/Layer4_round$r $CAMS_PATH/$TRIAL_NO/; done
