@@ -29,9 +29,9 @@ class WsolDataset(Dataset):
         cam_path = os.path.join(self.data_root, self.cam_paths[image_id][3])
         if os.path.isfile(cam_path):
             cam = np.load(cam_path)
-            cam = torch.from_numpy(cam).float()
-            cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0), image_size, mode='bicubic', align_corners=True)
-            cam = cam.squeeze(0)  # 1, H, W
+            cam = torch.from_numpy(cam).float().unsqueeze(0)
+            # cam = F.interpolate(cam.unsqueeze(0), image_size, mode='bicubic', align_corners=True)
+            # cam = cam.squeeze(0)  # 1, H, W
         return cam
 
     def get_mask(self, image_id):

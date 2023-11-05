@@ -29,7 +29,6 @@ do
       --num_workers=8 \
       --num_epochs=1000 \
       --num_rounds=$NUM_ROUNDS \
-      --pseudo_labeling_step=200 \
       --resize_size=256 \
       --crop_size=224 \
       --metadata_root=datasets/folds/GLAS/fold-0 \
