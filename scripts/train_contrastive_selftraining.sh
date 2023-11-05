@@ -3,6 +3,8 @@
 TRIAL_NO=2007
 NUM_ROUNDS=5
 
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+
 for ((r=1; r<=$NUM_ROUNDS; r++))
 do
     python main_contrastive_selftraining.py \

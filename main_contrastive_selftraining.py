@@ -84,6 +84,7 @@ def parse_options():
     parser.add_argument('--eval_freq', type=int, default=30, help='evaluation model on validation set frequency')
     parser.add_argument('--trial', type=str, default='0', help='id for recording multiple runs')
     parser.add_argument("--debug", dest="debug", action="store_true", help="activate debugging mode")
+    parser.add_argument("--seed", type=int, default=0, help="random seed value")
 
     opt = parser.parse_args()
 
@@ -166,7 +167,8 @@ def set_loader(opt):
             sampler=RandomSampler(
                 data_source=datasets[split],
                 replacement=True,
-                num_samples=batch_size * opt.iters_in_round
+                num_samples=batch_size * opt.iters_in_round,
+                generator=g
             ),
             num_workers=opt.num_workers,
             worker_init_fn=seed_worker,
@@ -180,8 +182,8 @@ def set_loader(opt):
             batch_size=1,
             shuffle=False,
             num_workers=opt.num_workers,
-            worker_init_fn=seed_worker,
-            generator=g
+            # worker_init_fn=seed_worker,
+            # generator=g
         )
         for split in other_splits
     }
@@ -358,15 +360,17 @@ def main():
     opt = parse_options()
 
     # Set deterministic training for reproducibility
-    opt.seed = 0
+    torch.manual_seed(opt.seed)
     random.seed(opt.seed)
     np.random.seed(opt.seed)
+    torch.use_deterministic_algorithms(True)
     opt.device = torch.device('cpu')
     if torch.cuda.is_available():
         opt.device = torch.device('cuda')
-        torch.manual_seed(opt.seed)
-        torch.cuda.manual_seed(opt.seed)
-        torch.cuda.manual_seed_all(opt.seed)
+        # In our experiments setting these two flags did not affect reproducibility,
+        # hence avoided for performance reasons.
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
 
     # logger
     logger = set_up_logger(logs_path=opt.log_folder)

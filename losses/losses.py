@@ -9,7 +9,7 @@ class FSCELoss(nn.Module):
     def __init__(self, class_weights, ignore_index):
         super(FSCELoss, self).__init__()
         weight = torch.FloatTensor(class_weights)
-        self.ce_loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction='mean')
+        self.ce_loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction='none')
 
     def forward(self, inputs, *targets, weights=None, **kwargs):
         loss = 0.0
@@ -20,14 +20,14 @@ class FSCELoss(nn.Module):
             for i in range(len(inputs)):
                 if len(targets) > 1:
                     target = self._scale_target(targets[i], (inputs[i].size(2), inputs[i].size(3)))
-                    loss += weights[i] * self.ce_loss(inputs[i], target)
+                    loss += weights[i] * self.ce_loss(inputs[i], target).mean()
                 else:
                     target = self._scale_target(targets[0], (inputs[i].size(2), inputs[i].size(3)))
-                    loss += weights[i] * self.ce_loss(inputs[i], target)
+                    loss += weights[i] * self.ce_loss(inputs[i], target).mean()
 
         else:
             target = self._scale_target(targets[0], (inputs.size(2), inputs.size(3)))
-            loss = self.ce_loss(inputs, target)
+            loss = self.ce_loss(inputs, target).mean()
 
         return loss
 
