@@ -206,8 +206,8 @@ class Resize(_BasicTransform):
 
         mask_ = mask
         if mask_ is not None:
-            mask_ = TF.resize(mask_, self.size, self.interpolation)
-            # mask_ = TF.resize(mask_, self.size, TF.InterpolationMode.NEAREST)
+            # mask_ = TF.resize(mask_, self.size, self.interpolation)
+            mask_ = TF.resize(mask_, self.size, TF.InterpolationMode.NEAREST)
 
         return TF.resize(img, self.size, self.interpolation), TF.resize(
             raw_img, self.size, self.interpolation), cam_, mask_
