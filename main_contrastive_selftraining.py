@@ -149,7 +149,7 @@ def set_loader(opt):
     }
 
     total_train_size = sum(len(datasets[split]) for split in train_splits)
-    opt.iters_in_epoch = math.ceil(total_train_size / opt.batch_size)
+    opt.iters_in_epoch = int(total_train_size / opt.batch_size)
     opt.iters_in_round = opt.epochs_in_round * opt.iters_in_epoch
 
     def seed_worker(worker_id):
@@ -238,9 +238,9 @@ def evaluate(model, val_loader, criterion, opt, pseudo_labels_path=None):
             logits_seg = logits['seg']
             if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
                 logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:],
-                                           mode='bilinear', align_corners=True)
-            # logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
-            logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
+                                           mode='bicubic', align_corners=False)
+            logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
+            # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
             if pseudo_labels_path is not None:
                 np.save(pseudo_labels_path, logits_seg)
             mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)

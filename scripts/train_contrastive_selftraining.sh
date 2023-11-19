@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TRIAL_NO=2007
+TRIAL_NO=3016
 NUM_ROUNDS=5
 
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
@@ -17,19 +17,19 @@ do
       --use_aspp \
       --optimizer=SGD \
       --lr_policy=lambda_poly \
-      --learning_rate=0.001 \
-      --lr_heads_ratio=10 \
+      --learning_rate=0.003 \
+      --lr_heads_ratio=3 \
       --weight_decay=0.0001 \
       --momentum=0.9 \
       --power=0.9 \
       --loss_weight=0.1 \
       --temperature=0.1 \
       --base_temperature=0.07 \
-      --sample_ratio_cl=0.04 \
+      --sample_ratio_cl=0.013 \
       --sample_ratio_ce=0.2 \
       --batch_size=32 \
       --num_workers=8 \
-      --num_epochs=1000 \
+      --num_epochs=500 \
       --num_rounds=$NUM_ROUNDS \
       --resize_size=256 \
       --crop_size=224 \

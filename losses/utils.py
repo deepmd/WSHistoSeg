@@ -27,7 +27,7 @@ def generate_foreground_background_mask(cams, ignore_index, sample_ratio):
 
     mask = torch.ones_like(cams, dtype=torch.uint8) * ignore_index
     mask[cams > fg_thrshold.unsqueeze(1).unsqueeze(1)] = 1
-    mask[cams <= bg_thrshold.unsqueeze(1).unsqueeze(1)] = 0
+    mask[cams < bg_thrshold.unsqueeze(1).unsqueeze(1)] = 0
     return mask
 
 
@@ -39,7 +39,7 @@ def generate_pseudo_mask_by_cam(cams, ignore_index, sample_ratio):
     bg_thresh = sorted_cams[:, thresh_index].unsqueeze(1).unsqueeze(1).unsqueeze(1)
     pseudo_mask = torch.ones_like(cams, dtype=torch.long) * ignore_index
     pseudo_mask[cams > fg_thresh] = 1
-    pseudo_mask[cams <= bg_thresh] = 0
+    pseudo_mask[cams < bg_thresh] = 0
     return pseudo_mask
 
 
