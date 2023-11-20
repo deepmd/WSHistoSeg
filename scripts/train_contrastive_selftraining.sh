@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TRIAL_NO=3016
+TRIAL_NO=3020
 NUM_ROUNDS=5
 
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
@@ -17,8 +17,8 @@ do
       --use_aspp \
       --optimizer=SGD \
       --lr_policy=lambda_poly \
-      --learning_rate=0.003 \
-      --lr_heads_ratio=3 \
+      --learning_rate=0.01 \
+      --lr_heads_ratio=1 \
       --weight_decay=0.0001 \
       --momentum=0.9 \
       --power=0.9 \
