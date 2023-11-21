@@ -136,7 +136,7 @@ class PixelContrastLoss(nn.Module):
 
         selected_pixels = generate_foreground_background_mask(cams, self.ignore_index, self.sample_ratio)
         selected_pixels = selected_pixels.to(masks.device)
-        if self.labeled_sample_ratio < 1:
+        if 0 < self.labeled_sample_ratio < 1:
             masks = sample_foreground_background_mask(masks, self.ignore_index, self.labeled_sample_ratio)
         selected_pixels = torch.where(use_pseudo_mask[:, None, None], selected_pixels, masks)
 
