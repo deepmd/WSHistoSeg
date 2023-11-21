@@ -416,7 +416,7 @@ def main():
         model_ = create_model(opt).to(opt.device)
         # Loading best model in previous iterations
         checkpoint_path = glob.glob(os.path.join(opt.save_folder,
-                                                 f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
+                                                 f"ckpt_valcl_*{opt.best_val_pxap['valcl']}.pth"))[0]
         logger.info(f"Loading best checkpoint '{checkpoint_path}'")
         state_dict = torch.load(checkpoint_path, map_location=opt.device)
         model_.load_state_dict(state_dict['model'])
