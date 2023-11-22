@@ -129,7 +129,7 @@ def is_required_grad(wsol_method):
 
 
 def save_pseudo_labels(model, data_loaders, save_path, round, logger, device):
-    os.rename(save_path, save_path + f'_round{round}')
+    os.rename(save_path, save_path + f'_round{round-1}')
     os.makedirs(save_path, exist_ok=False)
 
     model = model.eval()

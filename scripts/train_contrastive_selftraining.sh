@@ -44,6 +44,6 @@ done
 # moving generated pseudo-masks and prepare for a new trial
 CAMS_PATH=datasets/GlaS/Warwick_QU_Dataset_\(Released_2016_07_08\)/CAMs
 mv $CAMS_PATH/Layer4 $CAMS_PATH/Layer4_round$NUM_ROUNDS
-mv $CAMS_PATH/Layer4_round1 $CAMS_PATH/Layer4
+mv $CAMS_PATH/Layer4_round0 $CAMS_PATH/Layer4
 mkdir $CAMS_PATH/$TRIAL_NO
-for ((r=2; r<=$NUM_ROUNDS; r++)); do mv $CAMS_PATH/Layer4_round$r $CAMS_PATH/$TRIAL_NO/; done
+for ((r=1; r<=$NUM_ROUNDS; r++)); do mv $CAMS_PATH/Layer4_round$r $CAMS_PATH/$TRIAL_NO/; done
