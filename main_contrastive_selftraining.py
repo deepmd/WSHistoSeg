@@ -212,33 +212,19 @@ def set_model(opt):
     return model, criterion, optimizer, scheduler
 
 
-@torch.no_grad()
-def _normalize(cams: Tensor, spatial_dims: Optional[int] = None) -> Tensor:
-    """CAM normalization."""
-    spatial_dims = cams.ndim - 1 if spatial_dims is None else spatial_dims
-    cams.sub_(cams.flatten(start_dim=-spatial_dims).min(-1).values[(...,) + (None,) * spatial_dims])
-    cams.div_(cams.flatten(start_dim=-spatial_dims).max(-1).values[(...,) + (None,) * spatial_dims])
-
-    return cams
-
-
 def evaluate(model, val_loader, criterion, opt, pseudo_labels_path=None):
     model.eval()
     criterion.eval()
 
     # metrics = ConfMatrix(opt.num_classes)
     evaluator = MaskEvaluation(cam_curve_interval=0.001)
-
     with torch.no_grad():
         for idx, data_dict in enumerate(tqdm(val_loader)):
             images = data_dict['image'].to(opt.device)
             gt_masks = data_dict['mask'].to(opt.device)
 
-            logits = model(images)
-            logits_seg = logits['seg']
-            if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
-                logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:],
-                                           mode='bicubic', align_corners=False)
+            logits_seg = model(images)['seg']
+            logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:], mode='bicubic', align_corners=False)
             logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float)
             # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).detach().cpu().numpy().astype(float)
             if pseudo_labels_path is not None:
@@ -325,8 +311,11 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
                 metrics = evaluate(model, data_loaders[split], criterion, opt)
                 opt.logger.info(f"[{split.upper()}] [Epoch {opt.current_epoch}] "
                                 f"[Iteration {opt.current_iter}]\t")
+                log_messages = []
                 for metric, value in metrics.items():
-                    opt.logger.info(f"{metric}: {value}")
+                    if not isinstance(value, np.ndarray):
+                        log_messages.append(f'{metric}: {value}')
+                opt.logger.info('\n'.join(log_messages))
 
                 # add info to tensorboard
                 opt.tb_logger.add_scalar(f'{split}/PXAP', metrics['PXAP'], opt.current_iter)
