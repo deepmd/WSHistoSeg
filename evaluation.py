@@ -115,6 +115,7 @@ class MaskEvaluation(object):
 
         dice_fg = 2. * tp / (2. * tp + fp + fn)
         dice_bg = 2. * tn / (2. * tn + fp + fn)
+        mdice = 0.5 * (dice_fg + dice_bg)
 
         iou_fg = tp / (tp + fp + fn)
         iou_bg = tn / (tn + fp + fn)
@@ -141,7 +142,14 @@ class MaskEvaluation(object):
             constants.MTR_DICEFG: 100 * dice_fg[idx],
             constants.MTR_DICEBG: 100 * dice_bg[idx],
             constants.MTR_MIOU: 100 * miou[idx],
-            constants.MTR_BESTTAU: self.best_tau_list
+            constants.MTR_BESTTAU: self.best_tau_list,
+            'mdice_best': 100 * mdice[idx],
+            'miou': miou,
+            'mdice': mdice,
+            'dice_fg': dice_fg,
+            'dice_bg': dice_bg,
+            'precision': precision,
+            'recall': recall
         }
 
         self.curve_s = {
