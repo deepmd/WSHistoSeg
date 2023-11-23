@@ -15,7 +15,7 @@ if __name__ == '__main__':
     parser.add_argument('--cam_dir', type=str, help='')
     parser.add_argument('--mask_dir', type=str, help='')
     parser.add_argument('--run_dir', type=str, default="cams_evals", help='')
-    parser.add_argument('--split', type=str, default='test', help='')
+    parser.add_argument('--split', type=str, default='test', choices=['train', 'test', 'train+test'], help='')
     parser.add_argument('--method', type=str, default='ours', help='')
     cfg = parser.parse_args()
 
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     logger = set_up_logger(out_path, log_file_name=f'sample_metrics_{cfg.split}')
 
     split_evaluator = MaskEvaluation(cam_curve_interval=0.001)
-    pattern = f'{cfg.split}*.npy' if cfg.split else '*.npy'
+    pattern = f'{cfg.split}*.npy' if cfg.split != 'train+test' else '*.npy'
     cam_paths = glob(os.path.join(cfg.cam_dir, pattern))
     for idx, cam_path in enumerate(cam_paths):
         sample_evaluator = MaskEvaluation(cam_curve_interval=0.001)
