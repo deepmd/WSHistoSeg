@@ -86,10 +86,11 @@ class STDCLModel(torch.nn.Module):
 def create_model(cfg):
     model = STDCLModel(encoder_name='resnet50', num_classes=2, proj_dim=128, use_aspp=True)
 
-    if cfg.encoder_weights_dir is not None:
+    if cfg.weights is not None:
         if 'cam' in cfg.method:
-            encoder_weights = os.path.join(cfg.encoder_weights_dir, 'encoder.pt')
-            classifier_weights = os.path.join(cfg.encoder_weights_dir, 'classification_head.pt')
+            weights_dir = os.path.dirname(cfg.weights)
+            encoder_weights = os.path.join(weights_dir, 'encoder.pt')
+            classifier_weights = os.path.join(weights_dir, 'classification_head.pt')
 
             encoder_state_dict = torch.load(encoder_weights, map_location='cpu')
             classifier_state_dict = torch.load(classifier_weights, map_location='cpu')
@@ -97,8 +98,7 @@ def create_model(cfg):
             model.encoder.load_state_dict(encoder_state_dict, strict=True)
             model.classification_head.load_state_dict(classifier_state_dict, strict=True)
         else:
-            weights = os.path.join(cfg.encoder_weights_dir, 'ckpt_test_rnd_4_iter_120_85.76070359312466.pth')
-            state_dict = torch.load(weights)
+            state_dict = torch.load(cfg.weights)
             model.load_state_dict(state_dict['model'], strict=False)
 
     return model
@@ -225,18 +225,19 @@ def main(cfg):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--data_root', type=str, default="/home/reza/Documents/GLAS", help='')
-    parser.add_argument('--metadata_root', type=str, default="../datasets/folds/GLAS/fold-0", help='')
-    parser.add_argument('--method', type=str, default='ours',
+    parser.add_argument('--data_root', type=str, default="/home/reza/Documents/GLAS")
+    parser.add_argument('--metadata_root', type=str, default="../datasets/folds/GLAS/fold-0")
+    parser.add_argument('--method', type=str, default='gradcam',
                         choices=['gradcam', 'ours', 'gradcampp', 'smoothgradcampp',
                                  'xgradcam', 'layercam', 'cam', 'scorecam', 'iscam'],
                         help='')
-    parser.add_argument('--split', type=str, default='test', help='')
-    parser.add_argument('--run_dir', type=str, default="cams", help='')
-    parser.add_argument('--encoder_weights_dir', type=str, default="../weights", help='')
-    parser.add_argument('--crop_size', type=int, default=224, help='')
-    parser.add_argument('--num_workers', type=int, default=0, help='')
-    parser.add_argument('--save_cams', action='store_true', help='')
-    parser.add_argument('--save_metrics', action='store_true', help='')
+    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--run_dir', type=str, default="cams")
+    parser.add_argument('--weights', type=str,
+                        default="../weights/ckpt_test_rnd_4_iter_120_85.76070359312466.pth")
+    parser.add_argument('--crop_size', type=int, default=224)
+    parser.add_argument('--num_workers', type=int, default=0)
+    parser.add_argument('--save_cams', action='store_true')
+    parser.add_argument('--save_metrics', action='store_true')
     args = parser.parse_args()
     main(args)
