@@ -142,15 +142,14 @@ def save_pseudo_labels(model, data_loaders, save_path, round, logger, device):
                 image_name = data_dict['image_id'][0]
 
                 logits_seg = model(image)['seg']
-                logits_seg = torch.sigmoid(logits_seg[:, 1])
-                # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1]
-                pseudo_filename = image_name.split('/')[-1].replace('.bmp', '_layer4_cam.npy')
-                np.save(os.path.join(save_path, pseudo_filename), logits_seg.squeeze(0).detach().cpu().numpy().astype(float))
-                if list(logits_seg.shape[2:]) != list(gt_masks.shape[1:]):
-                    logits_seg = F.interpolate(logits_seg.unsqueeze(0),
-                                               gt_masks.size()[2:],
-                                               mode='bilinear', align_corners=False)
-                logits_seg = logits_seg.squeeze(0).squeeze(0).detach().cpu().numpy().astype(float)
+                cam_name = os.path.splitext(os.path.basename(image_name))[0] + '_layer4_cam.npy'
+                np.save(os.path.join(save_path, cam_name),
+                        torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float))
+                # np.save(os.path.join(save_path, cam_name),
+                #         torch.softmax(logits_seg, dim=1)[:, 1].squeeze().cpu().numpy().astype(float))
+                logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:], mode='bicubic', align_corners=False)
+                logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).squeeze(0).detach().cpu().numpy().astype(float)
+                # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).squeeze(0).cpu().numpy().astype(float)
 
                 mask = gt_masks.squeeze(0).squeeze(0).detach().cpu().numpy().astype(np.uint8)
                 evaluator.accumulate(logits_seg, mask)
