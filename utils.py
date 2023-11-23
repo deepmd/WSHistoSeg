@@ -122,7 +122,7 @@ def get_cam_extractor(wsol_method, model, target_layer=None, fc_layer=None):
 
 
 def is_required_grad(wsol_method):
-    if wsol_method.lower() in ['cam', 'scorecam', 'iscam', 'segmask']:
+    if wsol_method.lower() in ['cam', 'scorecam', 'iscam', 'ours']:
         return False
     elif wsol_method.lower() in ['layercam', 'gradcam', 'gradcampp', 'smoothgradcampp', 'xgradcam']:
         return True
