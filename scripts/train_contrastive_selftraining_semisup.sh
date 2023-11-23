@@ -1,7 +1,7 @@
 #!/bin/bash
 
-TRIAL_NO=2010
-NUM_ROUNDS=5
+TRIAL_NO=3024
+NUM_ROUNDS=4
 
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
@@ -17,8 +17,8 @@ do
       --use_aspp \
       --optimizer=SGD \
       --lr_policy=lambda_poly \
-      --learning_rate=0.001 \
-      --lr_heads_ratio=10 \
+      --learning_rate=0.01 \
+      --lr_heads_ratio=1 \
       --weight_decay=0.0001 \
       --momentum=0.9 \
       --power=0.9 \
@@ -26,12 +26,12 @@ do
       --temperature=0.1 \
       --base_temperature=0.07 \
       --labeled_sample_ratio_cl=0.5 \
-      --sample_ratio_cl=0.03 \
+      --sample_ratio_cl=0.013 \
       --sample_ratio_ce=0.2 \
       --batch_size=32 \
       --labeled_batch_ratio=0.5 \
       --num_workers=8 \
-      --num_epochs=1000 \
+      --num_epochs=500 \
       --num_rounds=$NUM_ROUNDS \
       --resize_size=256 \
       --crop_size=224 \
@@ -48,6 +48,6 @@ done
 # moving generated pseudo-masks and prepare for a new trial
 CAMS_PATH=datasets/GlaS/Warwick_QU_Dataset_\(Released_2016_07_08\)/CAMs
 mv $CAMS_PATH/Layer4 $CAMS_PATH/Layer4_round$NUM_ROUNDS
-mv $CAMS_PATH/Layer4_round1 $CAMS_PATH/Layer4
+mv $CAMS_PATH/Layer4_round0 $CAMS_PATH/Layer4
 mkdir $CAMS_PATH/$TRIAL_NO
-for ((r=2; r<=$NUM_ROUNDS; r++)); do mv $CAMS_PATH/Layer4_round$r $CAMS_PATH/$TRIAL_NO/; done
+for ((r=1; r<=$NUM_ROUNDS; r++)); do mv $CAMS_PATH/Layer4_round$r $CAMS_PATH/$TRIAL_NO/; done

@@ -412,22 +412,16 @@ def main():
         opt.current_epoch += 1
 
     logger.info(f'Round {round} finished.')
-    if round != opt.num_rounds:
-        model_ = create_model(opt).to(opt.device)
-        # Loading best model in previous iterations
-        checkpoint_path = glob.glob(os.path.join(opt.save_folder,
-                                                 f"ckpt_test_*{opt.best_val_pxap['test']}.pth"))[0]
-        logger.info(f"Loading best checkpoint '{checkpoint_path}'")
-        state_dict = torch.load(checkpoint_path, map_location=opt.device)
-        model_.load_state_dict(state_dict['model'])
-        # Generating CAMs
-        save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
-        save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
-        # round += 1
-        # Restarting optimizer and scheduler to initial state
-        # opt.current_epoch = 1
-        # opt.current_iter = 1
-        # model, ـ, optimizer, scheduler = set_model(opt)
+    model_ = create_model(opt).to(opt.device)
+    # Loading best model in previous iterations
+    checkpoint_path = glob.glob(os.path.join(opt.save_folder,
+                                             f"ckpt_valcl_*{opt.best_val_pxap['valcl']}.pth"))[0]
+    logger.info(f"Loading best checkpoint '{checkpoint_path}'")
+    state_dict = torch.load(checkpoint_path, map_location=opt.device)
+    model_.load_state_dict(state_dict['model'])
+    # Generating CAMs
+    save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
+    save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "
