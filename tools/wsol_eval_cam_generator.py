@@ -182,22 +182,29 @@ def main(cfg):
                 activation_map = cam_extractor(label, out['logits'])
                 with torch.no_grad():
                     cam = activation_map[0].squeeze(0)
+                    if cfg.save_cams:
+                        cam_path = os.path.join(cfg.run_dir, cfg.method, cfg.split, f"{image_name.split('.')[0]}.npy")
+                        np.save(cam_path, cam.cpu().numpy().astype(float))
+
                     cam = F.interpolate(cam.unsqueeze(0).unsqueeze(0),
                                         image.shape[2:],
                                         mode='bilinear',
-                                        align_corners=True).squeeze(0).squeeze(0)
-                    cam = cam.cpu().numpy().astype(float)
+                                        align_corners=True).squeeze().cpu().numpy().astype(float)
             else:
                 logits_seg = out['seg']
-                logits_seg = F.interpolate(logits_seg, image.shape[2:],
+                if cfg.save_cams:
+                    cam_path = os.path.join(cfg.run_dir, cfg.method, cfg.split, f"{image_name.split('.')[0]}.npy")
+                    np.save(cam_path, torch.sigmoid(logits_seg[:, 1]).squeeze().detach().cpu().numpy().astype(float))
+
+                logits_seg = F.interpolate(logits_seg,
+                                           image.shape[2:],
                                            mode='bicubic',
                                            align_corners=False)
-                cam = torch.sigmoid(logits_seg[:, 1]).squeeze(0).cpu().numpy().astype(float)
-                # cam = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).cpu().numpy().astype(float)
-            if cfg.save_cams:
-                np.save(os.path.join(cfg.run_dir, cfg.method, cfg.split, image_name.split('.')[0] + '.npy'), cam)
-            mask = F.interpolate(gt_mask.float(), image.shape[2:], mode='nearest').squeeze(0).squeeze(0)
-            mask = mask.cpu().numpy().astype(np.uint8)
+                cam = torch.sigmoid(logits_seg[:, 1]).squeeze().cpu().numpy().astype(float)
+                # cam = torch.softmax(logits_seg, dim=1)[:, 1].squeeze().cpu().numpy().astype(float)
+
+            mask = F.interpolate(gt_mask.float(), image.shape[2:], mode='nearest')
+            mask = mask.squeeze().cpu().numpy().astype(np.uint8)
 
             split_evaluator.accumulate(cam, mask)
             sample_evaluator.accumulate(cam, mask)
@@ -227,11 +234,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--data_root', type=str, default="/home/reza/Documents/GLAS")
     parser.add_argument('--metadata_root', type=str, default="../datasets/folds/GLAS/fold-0")
-    parser.add_argument('--method', type=str, default='gradcam',
+    parser.add_argument('--method', type=str, default='ours',
                         choices=['gradcam', 'ours', 'gradcampp', 'smoothgradcampp',
                                  'xgradcam', 'layercam', 'cam', 'scorecam', 'iscam'],
                         help='')
-    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--split', type=str, default='test', choices=['train', 'test', 'valcl'])
     parser.add_argument('--run_dir', type=str, default="cams")
     parser.add_argument('--weights', type=str,
                         default="../weights/ckpt_test_rnd_4_iter_120_85.76070359312466.pth")
