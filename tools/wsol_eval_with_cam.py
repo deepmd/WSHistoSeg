@@ -1,12 +1,11 @@
 import os
 import argparse
 from glob import glob
-from utils import set_up_logger
+
 import numpy as np
 import cv2
 
-import torch
-from torch.nn import functional as F
+from utils import set_up_logger
 from evaluation import MaskEvaluation
 np.seterr('ignore')
 
@@ -16,7 +15,8 @@ if __name__ == '__main__':
     parser.add_argument('--mask_dir', type=str, help='')
     parser.add_argument('--run_dir', type=str, default="cams_evals", help='')
     parser.add_argument('--split', type=str, default='test', choices=['train', 'test', 'train+test'], help='')
-    parser.add_argument('--method', type=str, default='ours', help='')
+    parser.add_argument('--method', type=str, default='gradcam', help='')
+    parser.add_argument('--resize_size', type=int, default=224, help='resize size')
     cfg = parser.parse_args()
 
     out_path = os.path.join(cfg.run_dir, cfg.method)
@@ -33,14 +33,11 @@ if __name__ == '__main__':
         mask_path = os.path.join(cfg.mask_dir, f'{image_name}_anno.bmp')
 
         cam = np.load(cam_path)
-        cam = torch.from_numpy(cam).unsqueeze(0).unsqueeze(0)
-        with torch.no_grad():
-            cam = F.interpolate(cam, (224, 224), mode='bilinear', align_corners=True)
-            cam = cam.squeeze(0).squeeze(0).numpy().astype(float)
+        cam = cv2.resize(cam, (cfg.resize_size, cfg.resize_size), interpolation=cv2.INTER_LINEAR)
 
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         mask = (mask > 0.5).astype(np.uint8)
-        mask = cv2.resize(mask, (224, 224), interpolation=cv2.INTER_NEAREST)
+        mask = cv2.resize(mask, (cfg.resize_size, cfg.resize_size), interpolation=cv2.INTER_NEAREST)
 
         split_evaluator.accumulate(cam, mask)
         sample_evaluator.accumulate(cam, mask)
