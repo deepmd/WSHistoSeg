@@ -75,9 +75,9 @@ class MaskEvaluation(object):
             idx = np.argmax(miou)
         else:
             idx = np.argmin(
-                np.abs(np.array(self.threshold_list_right_edge) - tau))
+                np.abs(np.array(self.threshold_list_right_edge[::-1]) - tau))
 
-        return self.threshold_list_right_edge[idx]
+        return self.threshold_list_right_edge[::-1][idx]
 
     def compute(self):
         """
@@ -119,8 +119,6 @@ class MaskEvaluation(object):
         iou_fg = tp / (tp + fp + fn)
         iou_bg = tn / (tn + fp + fn)
         miou = 0.5 * (iou_fg + iou_bg)
-        # miou = np.array(list(map(lambda x: round(x, 3), miou)))
-        # miou = np.array([miou[index] for index in np.arange(0.0, 1.0, 0.1)])
 
         if self.best_valid_tau is None:
             self.best_tau_list = [self.get_best_operating_point(
@@ -129,7 +127,7 @@ class MaskEvaluation(object):
             self.best_tau_list = [self.best_valid_tau]
 
         idx = np.argmin(np.abs(
-            self.threshold_list_right_edge - self.best_tau_list[0]))
+            self.threshold_list_right_edge[::-1] - self.best_tau_list[0]))
 
         total_fg = float(tp[idx] + fn[idx])
         total_bg = float(tn[idx] + fp[idx])
