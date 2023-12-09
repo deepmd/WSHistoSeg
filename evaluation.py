@@ -37,20 +37,19 @@ class MaskEvaluation(object):
     @staticmethod
     def check_scoremap_validity(scoremap):
         if not isinstance(scoremap, np.ndarray):
-            raise TypeError("Scoremap must be a numpy array; it is {}."
-                            .format(type(scoremap)))
+            raise TypeError(f"Scoremap must be a numpy array; it is {type(scoremap)}.")
         if scoremap.dtype != float:
-            raise TypeError("Scoremap must be of np.float type; it is of {} type."
-                            .format(scoremap.dtype))
+            raise TypeError(
+                f"Scoremap must be of np.float type; it is of {scoremap.dtype} type."
+            )
         if len(scoremap.shape) != 2:
-            raise ValueError("Scoremap must be a 2D array; it is {}D."
-                             .format(len(scoremap.shape)))
+            raise ValueError(f"Scoremap must be a 2D array; it is {len(scoremap.shape)}D.")
         if np.isnan(scoremap).any():
             raise ValueError("Scoremap must not contain nans.")
         if (scoremap > 1).any() or (scoremap < 0).any():
-            raise ValueError("Scoremap must be in range [0, 1]."
-                             "scoremap.min()={}, scoremap.max()={}."
-                             .format(scoremap.min(), scoremap.max()))
+            raise ValueError(
+                f"Scoremap must be in range [0, 1].scoremap.min()={scoremap.min()}, scoremap.max()={scoremap.max()}."
+            )
 
     def accumulate(self, scoremap, gt_mask):
         """
@@ -120,6 +119,8 @@ class MaskEvaluation(object):
         iou_fg = tp / (tp + fp + fn)
         iou_bg = tn / (tn + fp + fn)
         miou = 0.5 * (iou_fg + iou_bg)
+        # miou = np.array(list(map(lambda x: round(x, 3), miou)))
+        # miou = np.array([miou[index] for index in np.arange(0.0, 1.0, 0.1)])
 
         if self.best_valid_tau is None:
             self.best_tau_list = [self.get_best_operating_point(

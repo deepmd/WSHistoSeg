@@ -50,7 +50,7 @@ def strip_DataParallel(net):
 
 def save_checkpoint(model, optimizer, opt, epoch, save_file):
     opt.logger.info(f'==> Saving... "{save_file}"')
-    opt_dict = {k: v for k, v in opt.__dict__.items() if k != "logger" and k != "tb_logger"}
+    opt_dict = {k: v for k, v in opt.__dict__.items() if k not in ["logger", "tb_logger"]}
 
     state = {
         'opt': opt_dict,
@@ -76,7 +76,7 @@ def set_up_logger(logs_path, log_file_name=None):
     fileHandler.setFormatter(formatter)
     consoleHandler.setFormatter(formatter)
     logger.setLevel(logging.INFO)
-    logger.info("Created " + log_file_name)
+    logger.info(f"Created {log_file_name}")
     return logger
 
 
@@ -129,24 +129,22 @@ def is_required_grad(wsol_method):
 
 
 def save_pseudo_labels(model, data_loaders, save_path, round, logger, device):
-    os.rename(save_path, save_path + f'_round{round-1}')
+    os.rename(save_path, os.path.join(os.path.dirname(save_path), f'cams_round{round-1}'))
     os.makedirs(save_path, exist_ok=False)
 
     model = model.eval()
     with torch.no_grad():
         for split in ['train_ps', 'valcl', 'test']:
             evaluator = MaskEvaluation(cam_curve_interval=0.001)
-            for idx, data_dict in enumerate(tqdm(data_loaders[split])):
+            for data_dict in tqdm(data_loaders[split]):
                 image = data_dict['image'].to(device)
                 gt_masks = data_dict['mask'].to(device)
                 image_name = data_dict['image_id'][0]
+                cam_name = f'{os.path.splitext(os.path.basename(image_name))[0]}.npy'
 
                 logits_seg = model(image)['seg']
-                cam_name = os.path.splitext(os.path.basename(image_name))[0] + '_layer4_cam.npy'
                 np.save(os.path.join(save_path, cam_name),
-                        torch.sigmoid(logits_seg[:, 1]).squeeze(0).detach().cpu().numpy().astype(float))
-                # np.save(os.path.join(save_path, cam_name),
-                #         torch.softmax(logits_seg, dim=1)[:, 1].squeeze().cpu().numpy().astype(float))
+                        logits_seg[:, 1].squeeze(0).detach().cpu().numpy().astype(float))
                 logits_seg = F.interpolate(logits_seg, gt_masks.size()[2:], mode='bicubic', align_corners=False)
                 logits_seg = torch.sigmoid(logits_seg[:, 1]).squeeze(0).squeeze(0).detach().cpu().numpy().astype(float)
                 # logits_seg = torch.softmax(logits_seg, dim=1)[:, 1].squeeze(0).squeeze(0).cpu().numpy().astype(float)

@@ -8,6 +8,7 @@ import torch
 from torch import Tensor
 from torchvision import transforms
 import torchvision.transforms.functional as TF
+from torch.nn import functional as F
 
 PROB_THRESHOLD = 0.5  # probability threshold.
 
@@ -212,7 +213,7 @@ class Resize(_BasicTransform):
         return TF.resize(img, self.size, self.interpolation), TF.resize(
             raw_img, self.size, self.interpolation), cam_, mask_
 
-    def __repr__(self):
-        interpolate_str = _pil_interpolation_to_str[self.interpolation]
-        return self.__class__.__name__ + '(size={0}, interpolation={1})'.format(
-            self.size, interpolate_str)
+    # def __repr__(self):
+    #     interpolate_str = _pil_interpolation_to_str[self.interpolation]
+    #     return self.__class__.__name__ + '(size={0}, interpolation={1})'.format(
+    #         self.size, interpolate_str)

@@ -119,6 +119,7 @@ def build_loaders(cfg):
     data_transforms = build_transforms(cfg.crop_size)
     dataset = WsolDataset(data_root=cfg.data_root,
                           metadata_root=os.path.join(cfg.metadata_root, cfg.split),
+                          round_number=1,
                           suffix=[],
                           transforms=data_transforms)
 
@@ -194,7 +195,7 @@ def main(cfg):
                 logits_seg = out['seg']
                 if cfg.save_cams:
                     cam_path = os.path.join(cfg.run_dir, cfg.method, cfg.split, f"{image_name.split('.')[0]}.npy")
-                    np.save(cam_path, torch.sigmoid(logits_seg[:, 1]).squeeze().detach().cpu().numpy().astype(float))
+                    np.save(cam_path, logits_seg[:, 1].squeeze().detach().cpu().numpy().astype(float))
 
                 logits_seg = F.interpolate(logits_seg,
                                            image.shape[2:],
@@ -210,13 +211,14 @@ def main(cfg):
             sample_evaluator.accumulate(cam, mask)
             sample_evaluator.compute()
             sample_metrics = sample_evaluator.perf_gist
-            log_messages = [f'\n{image_name}']
-            for key, value in sample_metrics.items():
-                if not isinstance(value, np.ndarray):
-                    log_messages.append(f'{key}: {value}')
-            logger.info('\n'.join(log_messages))
 
-            print(f'{idx + 1}/{len(data_loader)}')
+            log_messages = [f'\n{idx + 1}/{len(data_loader)}: {image_name} Label: {label}']
+            log_messages.extend(
+                f'{key}: {value}'
+                for key, value in sample_metrics.items()
+                if not isinstance(value, np.ndarray)
+            )
+            logger.info('\n'.join(log_messages))
 
     split_evaluator.compute()
     split_metrics = split_evaluator.perf_gist

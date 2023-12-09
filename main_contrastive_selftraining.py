@@ -7,8 +7,6 @@ import math
 
 import numpy as np
 from tqdm import tqdm
-from typing import Optional
-from torch import Tensor
 
 import torch
 from torch.utils.data import DataLoader, RandomSampler
@@ -97,7 +95,8 @@ def parse_options():
     if opt.labeled_suffix and opt.unlabeled_suffix:
         opt.semi_supervised = True
         if opt.labeled_batch_ratio == 0:
-            raise ValueError("When specifying labeled_suffix and unlabeled_suffix, labeled_batch_ratio must be greater than 0!")
+            raise ValueError(
+                "When specifying labeled_suffix and unlabeled_suffix, labeled_batch_ratio must be greater than 0!")
     elif opt.labeled_suffix or opt.unlabeled_suffix:
         raise ValueError("Both labeled_suffix and unlabeled_suffix must be specified!")
 
@@ -141,7 +140,8 @@ def set_loader(opt):
     datasets = {
         split: WsolDataset(
             data_root=opt.data_root,
-            metadata_root=os.path.join(opt.metadata_root, split if not split.startswith('train') else 'train'),
+            metadata_root=os.path.join(opt.metadata_root, 'train' if split.startswith('train') else split),
+            round_number=opt.round,
             suffix=suffix,
             transforms=data_transforms[split]
         )
@@ -189,9 +189,9 @@ def set_loader(opt):
     }
     # pin_memory = True,
     # drop_last = True,
-    data_loaders.update({'train': train_loader})
+    data_loaders['train'] = train_loader
 
-    logger.info(f"Summary of the data:")
+    logger.info("Summary of the data:")
     logger.info(f"Number of images in training set = {total_train_size}")
     logger.info(f"Number of images in validation set = {len(datasets['valcl'])}")
     logger.info(f"Number of images in test set = {len(datasets['test'])}")
@@ -219,7 +219,7 @@ def evaluate(model, val_loader, criterion, opt, pseudo_labels_path=None):
     # metrics = ConfMatrix(opt.num_classes)
     evaluator = MaskEvaluation(cam_curve_interval=0.001)
     with torch.no_grad():
-        for idx, data_dict in enumerate(tqdm(val_loader)):
+        for data_dict in tqdm(val_loader):
             images = data_dict['image'].to(opt.device)
             gt_masks = data_dict['mask'].to(opt.device)
 
@@ -279,7 +279,7 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        scheduler.step(opt.current_iter)
+        scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -294,27 +294,24 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
 
         # print info
         if opt.current_iter % opt.print_freq == 0:
-            opt.logger.info(f"[Train] [Epoch {opt.current_epoch}] " +
-                            f"[Iteration {opt.current_iter}/{opt.iters_in_round}] " +
-                            f"BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t" +
-                            f"DT {data_time.val:.3f} ({data_time.avg:.3f})\t" +
-                            f"Total Loss: {losses.val:.3f} ({losses.avg:.3f}) " +
-                            f"CE Loss: {ce_losses.val:.3f} ({ce_losses.avg:.3f}) " +
-                            f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t" +
-                            f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t" +
-                            f"CoFG: {fg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count/losses.count:.1f})\t" +
-                            f"CoBG: {bg_sampled_correct.avg:.3f} (#{bg_sampled_correct.count/losses.count:.1f})\t" +
-                            "Learning rate: {}".format([param_group['lr'] for param_group in optimizer.param_groups]))
+            opt.logger.info(f"[Train] [Epoch {opt.current_epoch}] "
+                            + f"[Iteration {opt.current_iter}/{opt.iters_in_round}] "
+                            + f"BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                            + f"DT {data_time.val:.3f} ({data_time.avg:.3f})\t"
+                            + f"Total Loss: {losses.val:.3f} ({losses.avg:.3f}) "
+                            + f"CE Loss: {ce_losses.val:.3f} ({ce_losses.avg:.3f}) "
+                            + f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t"
+                            + f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t"
+                            + f"CoFG: {fg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count / losses.count:.1f})\t"
+                            + f"CoBG: {bg_sampled_correct.avg:.3f} (#{bg_sampled_correct.count / losses.count:.1f})\t"
+                            + f"Learning rate: {[param_group['lr'] for param_group in optimizer.param_groups]}")
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter == opt.iters_in_round:
             for split in ['valcl', 'test']:
                 metrics = evaluate(model, data_loaders[split], criterion, opt)
                 opt.logger.info(f"[{split.upper()}] [Epoch {opt.current_epoch}] "
                                 f"[Iteration {opt.current_iter}]\t")
-                log_messages = []
-                for metric, value in metrics.items():
-                    if not isinstance(value, np.ndarray):
-                        log_messages.append(f'{metric}: {value}')
+                log_messages = [f'{metric}: {value}' for metric, value in metrics.items() if not isinstance(value, np.ndarray)]
                 opt.logger.info('\n'.join(log_messages))
 
                 # add info to tensorboard
@@ -382,25 +379,24 @@ def main():
     opt.current_epoch = 1
     opt.current_iter = 1
     opt.best_val_pxap = {'valcl': -1, 'test': -1}
-    round = opt.round
     while opt.current_epoch <= opt.epochs_in_round:
         # opt.current_iter are updated in the train function.
         time1 = time.time()
         loss, ce_loss, contrast_loss, sample_accuracy = train(model, criterion, data_loaders,
-                                                              optimizer, scheduler, opt, round)
+                                                              optimizer, scheduler, opt, opt.round)
         time2 = time.time()
-        opt.logger.info(f"[End Epoch {opt.current_epoch}] Train Time: {(time2 - time1):0.2f}, " +
-                        f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) " +
-                        f"CoFG: {sample_accuracy[0]*100:.3f}, CoBG: {sample_accuracy[1]*100:.3f}")
+        opt.logger.info(f"[End Epoch {opt.current_epoch}] Train Time: {(time2 - time1):0.2f}, "
+                        + f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) "
+                        + f"CoFG: {sample_accuracy[0] * 100:.3f}, CoBG: {sample_accuracy[1] * 100:.3f}")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/ce_loss_avg', ce_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoFG', sample_accuracy[0]*100, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoBG', sample_accuracy[1]*100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoFG', sample_accuracy[0] * 100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoBG', sample_accuracy[1] * 100, opt.current_epoch)
 
         opt.current_epoch += 1
 
-    logger.info(f'Round {round} finished.')
+    logger.info(f'Round {opt.round} finished.')
     model_ = create_model(opt).to(opt.device)
     # Loading best model in previous iterations
     checkpoint_path = glob.glob(os.path.join(opt.save_folder,
@@ -409,8 +405,8 @@ def main():
     state_dict = torch.load(checkpoint_path, map_location=opt.device)
     model_.load_state_dict(state_dict['model'])
     # Generating CAMs
-    save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/Layer4')
-    save_pseudo_labels(model_, data_loaders, save_path, round, opt.logger, opt.device)
+    save_path = os.path.join(opt.data_root, 'Warwick_QU_Dataset_(Released_2016_07_08)/CAMs/training_cams')
+    save_pseudo_labels(model_, data_loaders, save_path, opt.round, opt.logger, opt.device)
 
     opt.logger.info(f"[End of training]:\n "
                     f"BEST PXAP on VALCL={opt.best_val_pxap['valcl']} \n "

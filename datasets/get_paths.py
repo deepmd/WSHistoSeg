@@ -11,12 +11,9 @@ def get_image_ids(root, suffix=None):
     path/to/image3.jpg
     ...
     """
-    file_path = os.path.join(root, 'image_ids.txt' if not suffix else f'image_ids_{suffix}.txt')
-    image_ids = []
-    with open(file_path) as f:
-        for line in f.readlines():
-            image_ids.append(line.strip('\n'))
-    return image_ids
+    file_path = os.path.join(root, f'image_ids_{suffix}.txt' if suffix else 'image_ids.txt')
+    with open(file_path) as file:
+        return [line.strip() for line in file]
 
 
 def get_class_labels(root):
@@ -31,15 +28,15 @@ def get_class_labels(root):
         """
         file_path = os.path.join(root, 'class_labels.txt')
         class_labels = {}
-        with open(file_path) as f:
-            for line in f.readlines():
-                image_id, class_label_string = line.strip('\n').split(',')
+        with open(file_path) as file:
+            for line in file:
+                image_id, class_label_string = line.strip().split(',')
                 class_labels[image_id] = int(class_label_string)
         return class_labels
 
 
 def get_mask_paths(root):
-        """
+    """
         localization.txt (for masks) has the structure
 
         <path>,<link_to_mask_file>,<link_to_ignore_mask_file>
@@ -52,27 +49,27 @@ def get_mask_paths(root):
         One image may contain multiple masks (multiple mask paths for same image).
         One image contains only one ignore mask.
         """
-        file_path = os.path.join(root, 'localization.txt')
-        mask_paths = {}
-        ignore_paths = {}
-        with open(file_path) as f:
-            for line in f.readlines():
-                image_id, mask_path, ignore_path = line.strip('\n').split(',')
-                if image_id in mask_paths:
-                    mask_paths[image_id].append(mask_path)
-                    assert (len(ignore_path) == 0)
-                else:
-                    mask_paths[image_id] = [mask_path]
-                    ignore_paths[image_id] = ignore_path
-        return mask_paths, ignore_paths
+    file_path = os.path.join(root, 'localization.txt')
+    mask_paths = {}
+    ignore_paths = {}
+    with open(file_path) as file:
+        for line in file:
+            image_id, mask_path, ignore_path = line.strip('\n').split(',')
+            if image_id in mask_paths:
+                mask_paths[image_id].append(mask_path)
+                assert (len(ignore_path) == 0)
+            else:
+                mask_paths[image_id] = [mask_path]
+                ignore_paths[image_id] = ignore_path
+    return mask_paths, ignore_paths
 
 
 def get_cam_paths(root):
-        file_path = os.path.join(root, 'image_cams.txt')
-        cam_paths = {}
-        with open(file_path) as f:
-            for line in f.readlines():
-                line_parts = line.strip('\n').split(',')
-                image_id, cam_file_paths = line_parts[0], line_parts[1:]
-                cam_paths[image_id] = cam_file_paths
-        return cam_paths
+    file_path = os.path.join(root, 'image_cams.txt')
+    cam_paths = {}
+    with open(file_path) as file:
+        for line in file:
+            line_parts = line.strip().split(',')
+            image_id, cam_file_paths = line_parts[0], line_parts[1]
+            cam_paths[image_id] = cam_file_paths
+    return cam_paths
