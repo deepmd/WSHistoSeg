@@ -247,9 +247,11 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
     losses = AverageMeter()
     ce_losses = AverageMeter()
     contrast_losses = AverageMeter()
-    expand_losses = AverageMeter()
-    fg_sampled_correct = AverageMeter()
-    bg_sampled_correct = AverageMeter()
+    # expand_losses = AverageMeter()
+    fg_sampled_correct_cl = AverageMeter()
+    bg_sampled_correct_cl = AverageMeter()
+    fg_sampled_correct_ce = AverageMeter()
+    bg_sampled_correct_ce = AverageMeter()
 
     end = time.time()
     for data_dict in data_loaders['train']:
@@ -265,15 +267,21 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
 
         # compute loss
         outputs = model(images)
-        loss, partial_losses, num_corrects, num_sampled = criterion(outputs, cams, masks, labels, use_pseudo_mask)
-        fg_sampled_correct.update(num_corrects[0] / num_sampled[0], num_sampled[0])
-        bg_sampled_correct.update(num_corrects[1] / num_sampled[1], num_sampled[1])
+        loss, partial_losses, metrics = criterion(outputs, cams, masks, labels, use_pseudo_mask)
+        n_corrects_cl = metrics['pseudo_mask_cl']['n_corrects']
+        n_sampled_cl = metrics['pseudo_mask_cl']['n_sampled']
+        fg_sampled_correct_cl.update(n_corrects_cl[0] / n_sampled_cl[0], n_sampled_cl[0])
+        bg_sampled_correct_cl.update(n_corrects_cl[1] / n_sampled_cl[1], n_sampled_cl[1])
+        n_corrects_ce = metrics['pseudo_mask_ce']['n_corrects']
+        n_sampled_ce = metrics['pseudo_mask_ce']['n_sampled']
+        fg_sampled_correct_ce.update(n_corrects_ce[0] / n_sampled_ce[0], n_sampled_ce[0])
+        bg_sampled_correct_ce.update(n_corrects_ce[1] / n_sampled_ce[1], n_sampled_ce[1])
 
         with torch.no_grad():
             losses.update(loss.item(), bsz)
             ce_losses.update(partial_losses['ce'], bsz)
             contrast_losses.update(partial_losses['contrast'], bsz)
-            expand_losses.update(partial_losses['expand'], bsz)
+            # expand_losses.update(partial_losses['expand'], bsz)
 
         # SGD
         optimizer.zero_grad()
@@ -296,14 +304,16 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         if opt.current_iter % opt.print_freq == 0:
             opt.logger.info(f"[Train] [Epoch {opt.current_epoch}] "
                             + f"[Iteration {opt.current_iter}/{opt.iters_in_round}] "
-                            + f"BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                            + f"BT {batch_time.val:.3f} ({batch_time.avg:.3f}) "
                             + f"DT {data_time.val:.3f} ({data_time.avg:.3f})\t"
                             + f"Total Loss: {losses.val:.3f} ({losses.avg:.3f}) "
                             + f"CE Loss: {ce_losses.val:.3f} ({ce_losses.avg:.3f}) "
                             + f"Contrast Loss: {contrast_losses.val:.3f} ({contrast_losses.avg:.3f})\t"
-                            + f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t"
-                            + f"CoFG: {fg_sampled_correct.avg:.3f} (#{fg_sampled_correct.count / losses.count:.1f})\t"
-                            + f"CoBG: {bg_sampled_correct.avg:.3f} (#{bg_sampled_correct.count / losses.count:.1f})\t"
+                            # + f"Expand Loss: {expand_losses.val:.3f} ({expand_losses.avg:.3f})\t"
+                            + f"CoFG_CL: {fg_sampled_correct_cl.avg:.3f} (#{fg_sampled_correct_cl.count / losses.count:.1f}) "
+                            + f"CoBG_CL: {bg_sampled_correct_cl.avg:.3f} (#{bg_sampled_correct_cl.count / losses.count:.1f}) "
+                            + f"CoFG_CE: {fg_sampled_correct_ce.avg:.3f} (#{fg_sampled_correct_ce.count / losses.count:.1f}) "
+                            + f"CoBG_CE: {bg_sampled_correct_ce.avg:.3f} (#{bg_sampled_correct_ce.count / losses.count:.1f})\t"
                             + f"Learning rate: {[param_group['lr'] for param_group in optimizer.param_groups]}")
 
         if opt.current_iter % opt.eval_freq == 0 or opt.current_iter == opt.iters_in_round:
@@ -339,7 +349,9 @@ def train(model, criterion, data_loaders, optimizer, scheduler, opt, round):
         if (opt.current_iter - 1) % opt.iters_in_epoch == 0:
             break
 
-    return losses.avg, ce_losses.avg, contrast_losses.avg, [fg_sampled_correct.avg, bg_sampled_correct.avg]
+    return (losses.avg, ce_losses.avg, contrast_losses.avg,
+            [fg_sampled_correct_cl.avg, bg_sampled_correct_cl.avg],
+            [fg_sampled_correct_ce.avg, bg_sampled_correct_ce.avg])
 
 
 def main():
@@ -382,17 +394,20 @@ def main():
     while opt.current_epoch <= opt.epochs_in_round:
         # opt.current_iter are updated in the train function.
         time1 = time.time()
-        loss, ce_loss, contrast_loss, sample_accuracy = train(model, criterion, data_loaders,
-                                                              optimizer, scheduler, opt, opt.round)
+        loss, ce_loss, contrast_loss, sample_accuracy_cl, sample_accuracy_ce = train(model, criterion, data_loaders,
+                                                                                     optimizer, scheduler, opt,
+                                                                                     opt.round)
         time2 = time.time()
         opt.logger.info(f"[End Epoch {opt.current_epoch}] Train Time: {(time2 - time1):0.2f}, "
                         + f"Loss: {loss:06.3f} (CE: {ce_loss:06.3f}, Contrast: {contrast_loss:06.3f}) "
-                        + f"CoFG: {sample_accuracy[0] * 100:.3f}, CoBG: {sample_accuracy[1] * 100:.3f}")
+                        + f"CoFG: {sample_accuracy_cl[0] * 100:.3f}, CoBG: {sample_accuracy_cl[1] * 100:.3f}")
         opt.tb_logger.add_scalar('train/total_loss_avg', loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/ce_loss_avg', ce_loss, opt.current_epoch)
         opt.tb_logger.add_scalar('train/contrast_loss_avg', contrast_loss, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoFG', sample_accuracy[0] * 100, opt.current_epoch)
-        opt.tb_logger.add_scalar('train/CoBG', sample_accuracy[1] * 100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoFG_CL', sample_accuracy_cl[0] * 100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoBG_CL', sample_accuracy_cl[1] * 100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoFG_CE', sample_accuracy_ce[0] * 100, opt.current_epoch)
+        opt.tb_logger.add_scalar('train/CoBG_CE', sample_accuracy_ce[1] * 100, opt.current_epoch)
 
         opt.current_epoch += 1
 

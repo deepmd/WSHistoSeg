@@ -6,30 +6,27 @@ from .utils import generate_foreground_background_mask, generate_pseudo_mask_by_
 
 # Cross-entropy Loss
 class FSCELoss(nn.Module):
-    def __init__(self, class_weights, ignore_index):
+    def __init__(self, class_weights, ignore_index, sample_ratio_ce):
         super(FSCELoss, self).__init__()
         weight = torch.FloatTensor(class_weights)
-        self.ce_loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction='none')
+        self.ignore_index = ignore_index
+        self.sample_ratio_ce = sample_ratio_ce
+        self.ce_loss = nn.CrossEntropyLoss(weight=weight, ignore_index=self.ignore_index, reduction='none')
 
-    def forward(self, inputs, *targets, weights=None, **kwargs):
-        loss = 0.0
-        if isinstance(inputs, tuple) or isinstance(inputs, list):
-            if weights is None:
-                weights = [1.0] * len(inputs)
+    def forward(self, inputs, cams, masks, use_pseudo_mask):
+        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, self.sample_ratio_ce)
+        target_mask = target_mask.to(inputs.device)
+        target_mask = torch.where(use_pseudo_mask[:, None, None, None], target_mask, masks)
 
-            for i in range(len(inputs)):
-                if len(targets) > 1:
-                    target = self._scale_target(targets[i], (inputs[i].size(2), inputs[i].size(3)))
-                    loss += weights[i] * self.ce_loss(inputs[i], target).mean()
-                else:
-                    target = self._scale_target(targets[0], (inputs[i].size(2), inputs[i].size(3)))
-                    loss += weights[i] * self.ce_loss(inputs[i], target).mean()
+        target_mask = self._scale_target(target_mask, (inputs.size(2), inputs.size(3)))
+        loss = self.ce_loss(inputs, target_mask).mean()
 
-        else:
-            target = self._scale_target(targets[0], (inputs.size(2), inputs.size(3)))
-            loss = self.ce_loss(inputs, target).mean()
-
-        return loss
+        masks = self._scale_target(masks, (inputs.size(2), inputs.size(3)))
+        num_fg = (target_mask == 1).sum()
+        num_bg = (target_mask == 0).sum()
+        num_fg_corrects = int((masks[target_mask == 1] == 1).sum())
+        num_bg_corrects = int((masks[target_mask == 0] == 0).sum())
+        return loss, [num_fg_corrects, num_bg_corrects], [num_fg, num_bg]
 
     @staticmethod
     def _scale_target(targets_, scaled_size):
@@ -45,34 +42,41 @@ class ContrastCELoss(nn.Module):
         super(ContrastCELoss, self).__init__()
 
         self.loss_weight = loss_weight
-        self.ignore_index = ignore_index
-        self.sample_ratio_ce = sample_ratio_ce
-        self.seg_criterion = FSCELoss(class_weights=class_weights, ignore_index=self.ignore_index)
+        self.seg_criterion = FSCELoss(class_weights=class_weights,
+                                      ignore_index=ignore_index,
+                                      sample_ratio_ce=sample_ratio_ce)
         # self.seg_criterion = DynamicLoss(gamma, None, ignore_index, reduction='None')
         self.contrast_criterion = PixelContrastLoss(
-            temperature=temperature, base_temperature=base_temperature, ignore_index=self.ignore_index,
+            temperature=temperature, base_temperature=base_temperature, ignore_index=ignore_index,
             labeled_sample_ratio=labeled_sample_ratio_cl, sample_ratio=sample_ratio_cl
         )
-        self.expand_loss = ExpandLoss(d_fg, d_bg)
+        # self.expand_loss = ExpandLoss(d_fg, d_bg)
 
     def forward(self, preds, cams, masks, labels, use_pseudo_mask):
+        metrics = {'pseudo_mask_ce': {'n_corrects': [], 'n_sampled': []},
+                   'pseudo_mask_cl': {'n_corrects': [], 'n_sampled': []}}
+        partial_losses = dict()
+
         assert "seg" in preds
         assert "embed" in preds
 
         seg_preds = preds['seg']
         embedding = preds['embed']
 
-        target_mask = generate_pseudo_mask_by_cam(cams, self.ignore_index, self.sample_ratio_ce)
-        target_mask = target_mask.to(seg_preds.device)
-        target_mask = torch.where(use_pseudo_mask[:, None, None, None], target_mask, masks)
+        loss_ce, num_corrects, num_sampled = self.seg_criterion(seg_preds, cams, masks, use_pseudo_mask)
+        partial_losses['ce'] = loss_ce
+        metrics['pseudo_mask_ce']['n_corrects'].extend(num_corrects)
+        metrics['pseudo_mask_ce']['n_sampled'].extend(num_sampled)
 
-        loss = self.seg_criterion(seg_preds, target_mask)
         loss_contrast, num_corrects, num_sampled = \
             self.contrast_criterion(embedding, cams, masks, use_pseudo_mask, labels)
-        loss_expand = self.expand_loss(seg_preds)
+        partial_losses['contrast'] = loss_contrast
+        metrics['pseudo_mask_cl']['n_corrects'].extend(num_corrects)
+        metrics['pseudo_mask_cl']['n_sampled'].extend(num_sampled)
 
-        return loss + self.loss_weight * loss_contrast + 0.0 * loss_expand,\
-               {'ce': loss, 'contrast': loss_contrast, 'expand': loss_expand}, num_corrects, num_sampled
+        # loss_expand = self.expand_loss(seg_preds)
+
+        return loss_ce + self.loss_weight * loss_contrast, partial_losses, metrics
 
 
 class PixelContrastLoss(nn.Module):
@@ -144,12 +148,7 @@ class PixelContrastLoss(nn.Module):
         fg_labels = torch.ones(fg_feats.shape[0])
 
         bg_feats = embeddings[selected_pixels == 0]
-        # bg_feats, indices = sample_bg(bg_feats, fg_feats)
         bg_labels = torch.zeros(bg_feats.shape[0])
-        # selected_pixels = selected_pixels.view(embeddings.size(0), -1)
-        # selected_pixels[selected_pixels == 0] = 255
-        # selected_pixels.scatter_(1, indices.to(selected_pixels.device), 0)
-        # selected_pixels = selected_pixels.view(embeddings.size(0), h, w)
 
         all_feats = torch.cat([fg_feats, bg_feats], dim=0).unsqueeze(1)
         all_labels = torch.cat([fg_labels, bg_labels], dim=0)
@@ -185,8 +184,7 @@ class ExpandLoss(nn.Module):
         g_bg = 1/torch.sum(bg_weights) * torch.sum(weighted_bg_preds, dim=1)
         loss_fg = -torch.mean(torch.log(g_fg))
         loss_bg = -torch.mean(torch.log(g_bg))
-        loss = loss_fg + loss_bg
-        return loss
+        return loss_fg + loss_bg
 
 
 class _Loss(torch.nn.Module):
