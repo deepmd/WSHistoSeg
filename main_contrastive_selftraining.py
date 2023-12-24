@@ -36,6 +36,8 @@ def parse_options():
     parser.add_argument('--proj_dim', type=int, default=128, help='num of channels in output of projection head')
     parser.add_argument('--num_classes', type=int, default=2, help='number of classes.')
     parser.add_argument('--pretrained', type=str, default=None, help='path to pretrained weights.')
+    parser.add_argument("--load_pre_best", action="store_true",
+                        help="Load best model from the previous round.")
     parser.add_argument("--use_aspp", dest="use_aspp", action="store_true",
                         help="use aspp module at the end of encoder.")
 
