@@ -65,7 +65,7 @@ def process_image(image_path, resize_size, round, run_dir):
 
     mask_on_image = overlay_images(image, gt_mask, alpha=0.4)
 
-    cam_path = os.path.join(args.cam_dir, f'{image_name}.npy')
+    cam_path = os.path.join(args.cam_dir, f'cams_round{round}', f'{image_name}.npy')
     cam_tensor = read_and_procees_cam(cam_path, resize_size)
 
     cl_mask = generate_pseudo_mask(cam_tensor, ignore_index=255, sample_ratio=0.013,
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument('--cam_dir', type=str, help='')
     parser.add_argument('--num_rounds', type=int, default=4, help='which round are CAMs related to')
     parser.add_argument('--run_dir', type=str, default='sampled_pixels_on_images', help='')
-    parser.add_argument('--split', type=str, default='test', choices=['train', 'test', 'train+test'], help='')
+    parser.add_argument('--split', type=str, default='train', choices=['train', 'test', 'train+test'], help='')
     parser.add_argument('--resize_size', type=int, default=224, help='resize size')
     args = parser.parse_args()
     main(args)
